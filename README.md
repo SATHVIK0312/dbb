@@ -1,4 +1,4 @@
-<img width="1097" height="481" alt="image" src="https://github.com/user-attachments/assets/830f055b-295d-41c5-92eb-1e95fa2ac627" /># dbb
+# dbb
 
 INSERT INTO project (projectid, title, startdate, projecttype, description) VALUES
 ('PJ0001', 'testing 1', '2025-10-06', 'API', 'checking demo 1');
@@ -101,54 +101,87 @@ INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, projectid) V
 ('TC0024', 'Verify user can logout successfully', 'TC0020', 'User must be logged in', '["Login","Smoke"]', '["PJ0014"]');
 
 
-
-CREATE TABLE testscript (
+CREATE TABLE teststep (
     testcaseid TEXT PRIMARY KEY,
     steps TEXT,
     args TEXT,
     stepnum INTEGER
 );
 
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0001',
+ '["STEP1","STEP2","STEP3"]',
+ '["NULL","ABC","NULL"]',
+ 3);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0001', '["STEP1","STEP2","STEP3"]', '["NULL","ABC","NULL"]', 3);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC00011',
+ '["Given the user is on the OrangeHRM login page","When the user clicks on \"Forgot your Password?\"","And enters their username","And clicks the \"Reset Password\" button","Then a password reset link should be sent successfully"]',
+ '["","","Admin","",""]',
+ 5);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC00011', '["Given the user is on the OrangeHRM login page","When the user clicks on \"Forgot your Password?\"","And enters their username","And clicks the \"Reset Password\" button","Then a password reset link should be sent successfully"]', '["","","Admin","",""]', 5);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0009',
+ '["Given the user is on the OrangeHRM login page","When the user enters the username","And the user enters the password","And clicks the login button","Then the user should be redirected to the dashboard"]',
+ '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin","admin123","",""]',
+ 5);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0009', '["Given the user is on the OrangeHRM login page","When the user enters the username","And the user enters the password","And clicks the login button","Then the user should be redirected to the dashboard"]', '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin","admin123","",""]', 5);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0010',
+ '["Given the user is on the OrangeHRM login page","When the user enters an invalid username","And clicks the login button","Then an \"Invalid credentials\" error message should be displayed"]',
+ '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin111111","",""]',
+ 4);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0010', '["Given the user is on the OrangeHRM login page","When the user enters an invalid username","And clicks the login button","Then an \\"Invalid credentials\\" error message should be displayed"]', '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin111111","",""]', 4);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0011',
+ '["Given the user is on the OrangeHRM login page","When the user enters the username","And the user enters the password","And clicks the login button","Then the user should be redirected to the dashboard"]',
+ '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin","admin123","",""]',
+ 5);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0011', '["Given the user is on the OrangeHRM login page","When the user enters the username","And the user enters the password","And clicks the login button","Then the user should be redirected to the dashboard"]', '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin","admin123","",""]', 5);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0012',
+ '["Given the user is on the OrangeHRM login page","When the user enters an invalid username","And clicks the login button","Then an \'Invalid credentials\' error message should be displayed"]',
+ '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin111111","",""]',
+ 4);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0012', '["Given the user is on the OrangeHRM login page","When the user enters an invalid username","And clicks the login button","Then an \'Invalid credentials\' error message should be displayed"]', '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","Admin111111","",""]', 4);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0013',
+ '["Given the user is on the OrangeHRM login page","When the user clicks on \'Forgot your Password?\'","And enters their username","And clicks the \'Reset Password\' button","Then a password reset link should be sent successfully"]',
+ '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","","Admin","",""]',
+ 5);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0013', '["Given the user is on the OrangeHRM login page","When the user clicks on \'Forgot your Password?\'","And enters their username","And clicks the \'Reset Password\' button","Then a password reset link should be sent successfully"]', '["https://opensource-demo.orangehrmlive.com/web/index.php/auth/login","","Admin","",""]', 5);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0020',
+ '["Given the user is on SauceDemo login page","When the user logs in with username and password","Then the user should be redirected to the Products page"]',
+ '["https://www.saucedemo.com","standard_user","secret_sauce"]',
+ 3);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0020', '["Given the user is on SauceDemo login page","When the user logs in with username and password","Then the user should be redirected to the Products page"]', '["https://www.saucedemo.com","standard_user","secret_sauce"]', 3);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0021',
+ '["Given the user is on SauceDemo login page","When the user enters invalid username and password","Then an error message should be displayed"]',
+ '["https://www.saucedemo.com","invalid_user","wrong_pass"]',
+ 3);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0021', '["Given the user is on SauceDemo login page","When the user enters invalid username and password","Then an error message should be displayed"]', '["https://www.saucedemo.com","invalid_user","wrong_pass"]', 3);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0022',
+ '["Given the user is logged into SauceDemo","When the user adds an item to the cart","Then the item should be visible in the cart"]',
+ '["https://www.saucedemo.com","Sauce Labs Backpack","1"]',
+ 3);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0022', '["Given the user is logged into SauceDemo","When the user adds an item to the cart","Then the item should be visible in the cart"]', '["https://www.saucedemo.com","Sauce Labs Backpack","1"]', 3);
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0023',
+ '["Given the user has an item in cart","When the user removes the item from the cart","Then the cart should be empty"]',
+ '["https://www.saucedemo.com","SauceLabs Backpack",""]',
+ 3);
 
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0023', '["Given the user has an item in cart","When the user removes the item from the cart","Then the cart should be empty"]', '["https://www.saucedemo.com","SauceLabs Backpack",""]', 3);
-
-INSERT INTO testscript (testcaseid, steps, args, stepnum) VALUES
-('TC0024', '["Given the user is logged into SauceDemo","When the user logs out","Then the user should be redirected to login page"]', '["https://www.saucedemo.com","",""]', 3);
-
-ALTER TABLE testscript RENAME TO teststep;
+INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES
+('TC0024',
+ '["Given the user is logged into SauceDemo","When the user logs out","Then the user should be redirected to login page"]',
+ '["https://www.saucedemo.com","",""]',
+ 3);
 
 
+------
 
 CREATE TABLE user (
     mail TEXT PRIMARY KEY,
