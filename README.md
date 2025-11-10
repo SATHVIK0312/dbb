@@ -1,4 +1,4 @@
-# dbb
+<img width="1097" height="481" alt="image" src="https://github.com/user-attachments/assets/830f055b-295d-41c5-92eb-1e95fa2ac627" /># dbb
 
 INSERT INTO project (projectid, title, startdate, projecttype, description) VALUES
 ('PJ0001', 'testing 1', '2025-10-06', 'API', 'checking demo 1');
@@ -183,3 +183,44 @@ INSERT INTO user (mail, password, userid, role, name) VALUES
 
 INSERT INTO user (mail, password, userid, role, name) VALUES
 ('abcdef@gmail.com', 'abc123', 'b5', 'role-2', 'sathvik');
+
+----
+CREATE TABLE user (
+    mail TEXT PRIMARY KEY,
+    password TEXT,
+    userid TEXT,
+    role TEXT,
+    name TEXT
+);
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('chetanw@gmail.com', 'chetanedc', 'a2', 'role-1', 'mokshit');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('xyz@gmail.com', 'Xyz@123', 'b1', 'role-2', 'chetan');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('qw@gmail.com', '123edc', 'b2', 'role-2', 'chetan');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('abc@gmail.com', 'Abc@123', 'a1', 'role-1', 'pranav');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('mokshshshshsw@gmail.com', 'chetanedc', 'a3', 'role-1', 'pranav');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('chase@gmail.com', 'hyderabad', 'b3', 'role-2', 'jpmc');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('abc123@email.com', 'abc123', 'b4', 'role-2', 'vedansh');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('abs@gmaill.com', 'abc123', 'a4', 'role-1', 'pranav2');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('abcdef@gmail.com', 'abc123', 'b5', 'role-2', 'sathvik');
+
+INSERT INTO user (mail, password, userid, role, name) VALUES
+('abcbala@gmail.com', 'abc123', 'a5', 'role-1', 'balasir');
+
+
