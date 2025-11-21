@@ -5,7 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
-namespace jpmc_genai.Services
+namespace JPMCGenAI_v1._0.Services
 {
     public class ApiSettings
     {
@@ -59,14 +59,9 @@ namespace jpmc_genai.Services
             {
                 _settings.Endpoints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["GetTestSteps"] = "testcases/{testCaseId}/steps",
-                    ["GetTestCases"] = "projects/{projectId}/testcases",
                     ["GetProjects"] = "my-projects",
                     ["CreateProject"] = "project/",
                     ["Login"] = "login/",
-                    ["TestPlan"] = "testplan/{testCaseId}",
-                    ["ExecuteCode"] = "execute-code?script_type={script_type}",
-                    ["ExecutionLogs"] = "execution",
                     ["User"] = "user/"
                 };
             }
