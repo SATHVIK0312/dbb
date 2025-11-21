@@ -8,7 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using jpmc_genai.Services;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0
 {
     public partial class LoginPage : Page
     {
@@ -49,4 +49,5 @@ namespace jpmc_genai
             this.NavigationService.Navigate(new RegisterPage());
         }
     }
+
 }
