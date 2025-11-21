@@ -1,4 +1,4 @@
-```<Page x:Class="JPMCGenAI_v1._0.LoginPage"
+<Page x:Class="JPMCGenAI_v1._0.LoginPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -109,4 +109,5 @@
             <TextBlock Text="© 2025 JPMC AI Platform" Foreground="#B0A78F" FontSize="11" TextAlignment="Center" Margin="0,30,0,0"/>
         </StackPanel>
     </Grid>
-</Page>```
+</Page>
+
