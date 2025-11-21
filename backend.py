@@ -219,7 +219,6 @@ async def create_tables():
             password TEXT NOT NULL,
             role TEXT NOT NULL
         );
-
         CREATE TABLE IF NOT EXISTS project (
             projectid TEXT PRIMARY KEY,
             title TEXT NOT NULL,
@@ -227,12 +226,10 @@ async def create_tables():
             projecttype TEXT NOT NULL,
             description TEXT
         );
-
         CREATE TABLE IF NOT EXISTS projectuser (
             userid TEXT PRIMARY KEY,
             projectid TEXT NOT NULL DEFAULT '[]'
         );
-
         CREATE TABLE IF NOT EXISTS testcase (
             testcaseid TEXT PRIMARY KEY,
             testdesc TEXT,
@@ -300,6 +297,7 @@ async def lifespan(app: FastAPI):
 app.router.lifespan_context = lifespan
 
 # ====================== ENDPOINTS ======================
+
 @app.post("/user/", response_model=UserResponse)
 async def create_user(user: UserCreate):
     prefix = get_prefix_from_role(user.role)
@@ -307,16 +305,12 @@ async def create_user(user: UserCreate):
         raise HTTPException(status_code=400, detail="Invalid role. Must be 'role-1' to 'role-26'.")
     conn = await get_db_connection()
     try:
-        # Check email
         row = await (await conn.execute("SELECT 1 FROM \"user\" WHERE mail = ?", (user.mail,))).fetchone()
         if row:
             raise HTTPException(status_code=400, detail="Email already exists.")
-
-        # Count for userid
         count_row = await (await conn.execute("SELECT COUNT(*) AS c FROM \"user\" WHERE userid LIKE ? AND role = ?", (f"{prefix}%", user.role))).fetchone()
         next_num = (count_row["c"] if count_row else 0) + 1
         new_userid = f"{prefix}{next_num}"
-
         await conn.execute('INSERT INTO "user" (name, mail, password, userid, role) VALUES (?, ?, ?, ?, ?)',
                           (user.name, user.mail, user.password, new_userid, user.role))
         await conn.commit()
@@ -345,16 +339,13 @@ async def login_user(login: LoginCreate):
             raise HTTPException(status_code=401, detail="Invalid username or password")
         userid, role = row["userid"], row["role"]
         token = jwt.encode({"userid": userid, "role": role}, SECRET_KEY, algorithm=ALGORITHM)
-
         row = await (await conn.execute('SELECT projectid FROM projectuser WHERE userid = ?', (userid,))).fetchone()
         projectids = from_json(row["projectid"] if row else None) if row else []
-
         projects = []
         for pid in projectids:
             proj = await (await conn.execute('SELECT * FROM project WHERE projectid = ?', (pid,))).fetchone()
             if proj:
                 projects.append(ProjectResponse(**proj))
-
         return LoginResponse(userid=userid, role=role, token=token, projects=projects)
     finally:
         await conn.close()
@@ -399,11 +390,53 @@ async def assign_project_access(
             else:
                 await conn.execute("INSERT INTO projectuser (userid, projectid) VALUES (?, ?)", (uid, to_json(all_pids)))
             assigned.append(AssignmentResponse(userid=uid, projectids=new_pids))
-
         await conn.commit()
         return BulkAssignmentResponse(message="Access assigned successfully.", assigned=assigned)
     finally:
         await conn.close()
+
+# ====================== NEW ENDPOINT: /my-projects (FULLY FIXED FOR SQLITE) ======================
+@app.get("/my-projects", response_model=List[ProjectInfo],
+        summary="Get all projects assigned to the current user")
+async def get_my_projects(current_user: dict = Depends(get_current_any_user)):
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # Get user's project IDs (stored as JSON string)
+        proj_row = await (await conn.execute("SELECT projectid FROM projectuser WHERE userid = ?", (userid,))).fetchone()
+        if not proj_row or not proj_row["projectid"] or proj_row["projectid"] == "[]":
+            return []
+
+        user_project_ids = from_json(proj_row["projectid"])
+
+        # Fetch full project details
+        projects = []
+        for pid in user_project_ids:
+            project = await (await conn.execute(
+                """
+                SELECT projectid, title, startdate, projecttype, description
+                FROM project WHERE projectid = ?
+                """,
+                (pid,)
+            )).fetchone()
+            if project:
+                projects.append(ProjectInfo(
+                    projectid=project["projectid"],
+                    title=project["title"],
+                    startdate=project["startdate"],
+                    projecttype=project["projecttype"],
+                    description=project["description"]
+                ))
+
+        return projects
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching projects: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
 
 if __name__ == "__main__":
     import uvicorn
