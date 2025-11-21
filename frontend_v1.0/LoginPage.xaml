@@ -1,66 +1,112 @@
-﻿<Page x:Class="JPMCGenAI_v1._0.LoginPage"
+```<Page x:Class="JPMCGenAI_v1._0.LoginPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
-      xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
-      mc:Ignorable="d" 
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      mc:Ignorable="d"
       d:DesignHeight="600" d:DesignWidth="1000"
-      Background="#0F1419"
+      Background="#FAF9F6"
       Title="LoginPage">
+
+    <Page.Resources>
+        <!-- Rounded TextBox Style -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#333"/>
+            <Setter Property="BorderBrush" Value="#D4AF37"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border CornerRadius="20" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Rounded PasswordBox Style -->
+        <Style TargetType="PasswordBox">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#333"/>
+            <Setter Property="BorderBrush" Value="#D4AF37"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border CornerRadius="20" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Rounded Button Style -->
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="20" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
     <Grid>
-        <!-- Left side with branding -->
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="400" />
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="400"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Added left panel with gradient background and branding -->
-        <Border Grid.Column="0" Background="#1A1E27">
+        <!-- Left Panel -->
+        <Border Grid.Column="0" Background="#F5F3EF">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="JPMC-AI" Foreground="#00D4FF" FontSize="48" FontWeight="Bold" TextAlignment="Center" Margin="0,0,0,10" />
-                <TextBlock Text="Automated Test Execution Platform" Foreground="#B0BEC5" FontSize="16" TextAlignment="Center" Margin="0,0,0,30" />
-                <TextBlock Text="Powered by AI-driven test automation" Foreground="#90A4AE" FontSize="13" TextAlignment="Center" />
+                <TextBlock Text="JPMC-AI" Foreground="#D4AF37" FontSize="48" FontWeight="Bold" Margin="0,0,0,10"/>
+                <TextBlock Text="Automated Test Execution Platform" Foreground="#8C8575" FontSize="16" Margin="0,0,0,30"/>
+                <TextBlock Text="Powered by AI-driven test automation" Foreground="#A8A190" FontSize="13"/>
             </StackPanel>
         </Border>
 
-        <!-- Right side with login form -->
-        <!-- Redesigned form layout with better spacing and styling -->
+        <!-- Right Panel -->
         <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Width="340">
-            <!-- Title -->
-            <TextBlock Text="Welcome Back" Foreground="White" FontSize="28" FontWeight="Bold" Margin="0,0,0,10" />
-            <TextBlock Text="Sign in to your account" Foreground="#B0BEC5" FontSize="13" Margin="0,0,0,30" />
+            <TextBlock Text="Welcome Back" Foreground="#333" FontSize="28" FontWeight="Bold" Margin="0,0,0,10"/>
+            <TextBlock Text="Sign in to your account" Foreground="#A8A190" FontSize="13" Margin="0,0,0,30"/>
 
-            <!-- Username Input -->
-            <TextBlock Text="Username" Foreground="#E0E0E0" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Grid Margin="0,0,0,15">
-                <TextBox x:Name="UsernameTextBox" Height="40" Padding="12,8" FontSize="13" />
-                <TextBlock Text="Enter your username" Style="{StaticResource PlaceholderStyle}" 
-                           Visibility="{Binding Text, ElementName=UsernameTextBox, Converter={StaticResource InvertedBooleanToVisibilityConverter}}" />
-            </Grid>
+            <TextBlock Text="Username" Foreground="#555" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8"/>
+            <TextBox x:Name="UsernameTextBox"/>
 
-            <!-- Password Input -->
-            <TextBlock Text="Password" Foreground="#E0E0E0" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Grid Margin="0,0,0,25">
-                <PasswordBox x:Name="PasswordBox" Height="40" Padding="12,8" FontSize="13" />
-                <TextBlock Text="" Style="{StaticResource PlaceholderStyle}" 
-                           Visibility="{Binding Password, ElementName=PasswordBox, Converter={StaticResource InvertedBooleanToVisibilityConverter}}" />
-            </Grid>
+            <TextBlock Text="Password" Foreground="#555" FontSize="12" FontWeight="SemiBold" Margin="15,0,0,8"/>
+            <PasswordBox x:Name="PasswordBox"/>
 
-            <!-- Login Button -->
-            <Button Content="Sign In" Click="LoginButton_Click" Height="40" Margin="0,0,0,10" FontSize="13" FontWeight="SemiBold" Foreground="White" Background="#00D4FF" />
+            <Button Content="Sign In" Click="LoginButton_Click" Margin="0,20,0,10" 
+                    Foreground="White" Background="#D4AF37"/>
 
-            <!-- Divider -->
             <Grid Margin="0,15,0,15">
-                <Border Background="#333333" Height="1" />
-                <TextBlock Text="or" Foreground="#757575" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#0F1419" Padding="8,0" />
+                <Border Background="#E5E3DD" Height="1"/>
+                <TextBlock Text="or" Foreground="#A8A190" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#FAF9F6" Padding="8,0"/>
             </Grid>
 
-            <!-- Register Button -->
-            <Button Content="Create New Account" Click="RegisterButton_Click" Height="40" FontSize="13" FontWeight="SemiBold" Background="Transparent" BorderBrush="#00D4FF" BorderThickness="1" Foreground="#00D4FF" />
+            <Button Content="Create New Account" Click="RegisterButton_Click" 
+                    Background="Transparent" BorderBrush="#D4AF37" Foreground="#D4AF37" BorderThickness="1"/>
 
-            <!-- Footer -->
-            <TextBlock Text="© 2025 JPMC AI Platform" Foreground="#424242" FontSize="11" TextAlignment="Center" Margin="0,30,0,0" />
+            <TextBlock Text="© 2025 JPMC AI Platform" Foreground="#B0A78F" FontSize="11" TextAlignment="Center" Margin="0,30,0,0"/>
         </StackPanel>
     </Grid>
-</Page>
-
+</Page>```
