@@ -1,16 +1,14 @@
 from fastapi import FastAPI, HTTPException, Depends, Body, File, UploadFile, Form
-# from fastapi import StreamingResponse # type: ignore
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, List
-# import asyncpg                                 # ← REMOVED
-import aiosqlite                                  # ← ADDED (only change)
+import aiosqlite
 import asyncio
 from contextlib import asynccontextmanager
 from playwright.async_api import async_playwright
 import string
 from datetime import date
-from jose import JWTError, jwt # Fixed: Import jwt from jose
+from jose import JWTError, jwt
 import pandas as pd
 import io
 import playwright.sync_api as pw
@@ -41,27 +39,25 @@ import logging
 import json
 import logging
 from datetime import datetime
-from jose import jwt, JWTError # For token validation
+from jose import jwt, JWTError
 from fastapi.security import HTTPBearer
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# ====================== YOUR DATABASE ======================
+DB_URL = "genai.db"  # Change this to full path if needed: r"C:\path\to\genai.db"
+
 app = FastAPI(title="User Management API", description="API to manage users and projects with auto-generated IDs based on roles", version="1.0.0")
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8003", "http://127.0.0.1:8003", "http://localhost:8501", "http://127.0.0.1:8501"],
+    allow_origins=["http://localhost:8003", "http://127.0.0.1:8003", "http://localhost:8501", "http://127.0.0.1:8501", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ====================== SQLITE DB URL ======================
-DB_URL = "test_management.db"   # ← Your local SQLite file (this is the only real change)
-
-# JWT Configuration
 SECRET_KEY = "your-super-secret-key-change-in-production"
 ALGORITHM = "HS256"
 security = HTTPBearer()
@@ -71,38 +67,31 @@ app = FastAPI(title="User Management API",
 
 import playwright.sync_api as pw
 
-async def log_generator(script_content, script_type):
-    if script_type == "playwright":
-        with pw.sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            # Execute script_content safely (e.g., with exec() and sandbox)
-            browser.close()
+# ====================== JSON Helpers for Lists ======================
+import json as json_lib
+def to_json(val): return json_lib.dumps(val or [])
+def from_json(val):
+    if not val or val == "[]": return []
+    try: return json_lib.loads(val)
+    except: return []
 
-# ------------------------------------------------------------------
-# Response Model for Test Execution
-# ------------------------------------------------------------------
+# ====================== MODELS (All your original ones) ======================
 class ExecutionLog(BaseModel):
-    timestamp: str
+    timestamp: str = datetime.now().isoformat()
     message: str
-    status: str # "INFO", "ERROR", "SUCCESS"
+    status: str
 
 class ExecutionResponse(BaseModel):
     testcaseid: str
     script_type: str
-    status: str # "STARTED", "RUNNING", "COMPLETED", "FAILED"
+    status: str
+    logs: List[ExecutionLog] = []
 
-# ------------------------------------------------------------------
-# Response Model for Test Script Upload
-# ------------------------------------------------------------------
 class TestScriptResponse(BaseModel):
     testcaseid: str
     projectid: str
     message: str
 
-# ------------------------------------------------------------------
-# Response Models for Project & Test Case Endpoints
-# ------------------------------------------------------------------
 class ProjectInfo(BaseModel):
     projectid: str
     title: str
@@ -124,20 +113,6 @@ class TestStepInfo(BaseModel):
     args: List[str]
     stepnum: int
 
-class ExecutionLog(BaseModel):
-    timestamp: str = datetime.now().isoformat()
-    message: str
-    status: str # "INFO", "RUNNING", "SUCCESS", "FAILED", "ERROR"
-
-class ExecutionResponse(BaseModel):
-    testcaseid: str
-    script_type: str # "playwright" or "selenium"
-    status: str # "STARTED", "RUNNING", "COMPLETED", "FAILED"
-    logs: List[ExecutionLog] = []
-
-# ------------------------------------------------------------------
-# Pydantic Response Models for /me
-# ------------------------------------------------------------------
 class StepResponse(BaseModel):
     steps: List[str]
     args: List[str]
@@ -165,38 +140,32 @@ class UserDashboardResponse(BaseModel):
     role: str
     projects: List[ProjectWithTestCases]
 
-# Pydantic model for user input
 class UserCreate(BaseModel):
     name: str
     mail: str
     password: str
-    role: str # Expected format: "role-1", "role-2", etc.
+    role: str
 
-# Pydantic model for user response
 class UserResponse(BaseModel):
     name: str
     mail: str
     userid: str
     role: str
 
-# Pydantic model for login input (using 'username' as 'name' for login)
 class LoginCreate(BaseModel):
-    username: str # This maps to 'name' in the user table
+    username: str
     password: str
 
-# Pydantic model for project creation input
 class ProjectCreate(BaseModel):
     title: str
     startdate: date
     projecttype: str
     description: str
 
-# Pydantic model for single assignment input
 class AssignmentCreate(BaseModel):
     userid: str
     projectids: List[str]
 
-# Pydantic model for project details/response
 class ProjectResponse(BaseModel):
     projectid: str
     title: str
@@ -204,17 +173,14 @@ class ProjectResponse(BaseModel):
     projecttype: str
     description: str
 
-# Pydantic model for assignment response
 class AssignmentResponse(BaseModel):
     userid: str
     projectids: List[str]
 
-# Pydantic model for bulk response
 class BulkAssignmentResponse(BaseModel):
     message: str
     assigned: List[AssignmentResponse]
 
-# Pydantic model for testcase creation input
 class TestCaseCreate(BaseModel):
     testdesc: str
     pretestid: str
@@ -222,23 +188,6 @@ class TestCaseCreate(BaseModel):
     tag: List[str]
     projectid: List[str]
 
-class TestStepResponse(BaseModel):
-    testcaseid: str
-    steps: List[str]
-    args: List[str]
-    stepnum: int
-
-class BulkTestCaseResponse(BaseModel):
-    testcaseid: str
-    message: str
-    steps_saved: int
-
-class BulkUploadResponse(BaseModel):
-    message: str
-    testcases_created: int
-    total_steps: int
-
-# Pydantic model for testcase response
 class TestCaseResponse(BaseModel):
     testcaseid: str
     testdesc: str
@@ -247,28 +196,18 @@ class TestCaseResponse(BaseModel):
     tag: List[str]
     projectid: List[str]
 
-# Pydantic model for login response (updated with token)
 class LoginResponse(BaseModel):
     userid: str
     role: str
     token: str
     projects: List[ProjectResponse]
 
-# ====================== JSON <-> List helpers (SQLite has no arrays) ======================
-import json as json_lib
-def _to_json(val): return json_lib.dumps(val or [])
-def _from_json(val): 
-    if not val or val == "[]": return []
-    try: return json_lib.loads(val)
-    except: return []
-
-# ====================== SQLite Connection ======================
+# ====================== DB Connection & Table Creation ======================
 async def get_db_connection():
     conn = await aiosqlite.connect(DB_URL)
     conn.row_factory = aiosqlite.Row
     return conn
 
-# ====================== Table creation on startup ======================
 @app.on_event("startup")
 async def create_tables():
     conn = await get_db_connection()
@@ -291,7 +230,7 @@ async def create_tables():
 
         CREATE TABLE IF NOT EXISTS projectuser (
             userid TEXT PRIMARY KEY,
-            projectid TEXT NOT NULL DEFAULT '[]'   -- JSON array
+            projectid TEXT NOT NULL DEFAULT '[]'
         );
 
         CREATE TABLE IF NOT EXISTS testcase (
@@ -306,208 +245,165 @@ async def create_tables():
     await conn.commit()
     await conn.close()
 
-# Function to generate prefix from role
+# ====================== Helpers ======================
 def get_prefix_from_role(role: str) -> Optional[str]:
     if not role.startswith("role-"):
         return None
     try:
         role_num = int(role.split("-")[1])
-        if role_num < 1 or role_num > 26:
-            return None
-        return string.ascii_lowercase[role_num - 1]
-    except (ValueError, IndexError):
-        return None
+        if 1 <= role_num <= 26:
+            return string.ascii_lowercase[role_num - 1]
+    except:
+        pass
+    return None
 
-# Function to generate next sequential projectid (PJ0001, PJ0002, etc.)
 async def get_next_projectid(conn):
     row = await (await conn.execute("SELECT projectid FROM project ORDER BY projectid DESC LIMIT 1")).fetchone()
-    if row is None:
+    if not row:
         return "PJ0001"
-    try:
-        num = int(row["projectid"][2:]) + 1
-        return f"PJ{num:04d}"
-    except (ValueError, IndexError):
-        raise HTTPException(status_code=500, detail="Invalid projectid format in database. Expected 'PJxxxx'.")
+    num = int(row["projectid"][2:]) + 1
+    return f"PJ{num:04d}"
 
-# Function to generate next sequential testcaseid (TC0001, TC0002, etc.)
 async def get_next_testcaseid(conn):
     row = await (await conn.execute("SELECT testcaseid FROM testcase ORDER BY testcaseid DESC LIMIT 1")).fetchone()
-    if row is None:
+    if not row:
         return "TC0001"
-    try:
-        num = int(row["testcaseid"][2:]) + 1
-        return f"TC{num:04d}"
-    except (ValueError, IndexError):
-        raise HTTPException(status_code=500, detail="Invalid testcaseid format in database. Expected 'TCxxxx'.")
+    num = int(row["testcaseid"][2:]) + 1
+    return f"TC{num:04d}"
 
-# JWT dependencies
+# ====================== JWT ======================
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        userid: str = payload.get("userid")
-        role: str = payload.get("role")
-        if userid is None or role != "role-1":
+        userid = payload.get("userid")
+        role = payload.get("role")
+        if not userid or role != "role-1":
             raise HTTPException(status_code=403, detail="You are not Authorised")
         return {"userid": userid, "role": role}
-    except (JWTError, ValueError):
+    except JWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
 
 async def get_current_any_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        userid: str = payload.get("userid")
-        role: str = payload.get("role")
-        if userid is None:
+        userid = payload.get("userid")
+        role = payload.get("role")
+        if not userid:
             raise HTTPException(status_code=401, detail="Invalid authentication token")
         return {"userid": userid, "role": role}
-    except (JWTError, ValueError):
+    except JWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
 
-# Startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
 app.router.lifespan_context = lifespan
 
-@app.post("/user/", response_model=UserResponse, summary="Create a new user")
+# ====================== ENDPOINTS ======================
+@app.post("/user/", response_model=UserResponse)
 async def create_user(user: UserCreate):
     prefix = get_prefix_from_role(user.role)
-    if prefix is None:
-        raise HTTPException(status_code=400,
-                            detail="Invalid role. Must be 'role-1', 'role-2', etc. (up to role-26 for a-z).")
-    conn = None
+    if not prefix:
+        raise HTTPException(status_code=400, detail="Invalid role. Must be 'role-1' to 'role-26'.")
+    conn = await get_db_connection()
     try:
-        conn = await get_db_connection()
-        existing_user = await (await conn.execute('SELECT userid FROM "user" WHERE mail = ?', (user.mail,))).fetchone()
-        if existing_user:
+        # Check email
+        row = await (await conn.execute("SELECT 1 FROM \"user\" WHERE mail = ?", (user.mail,))).fetchone()
+        if row:
             raise HTTPException(status_code=400, detail="Email already exists.")
 
-        count_result = await conn.fetchval(
-            'SELECT COUNT(*) FROM "user" WHERE userid LIKE ? AND role = ?',
-            (f"{prefix}%", user.role)
-        )
-        next_num = int(count_result or 0) + 1
+        # Count for userid
+        count_row = await (await conn.execute("SELECT COUNT(*) AS c FROM \"user\" WHERE userid LIKE ? AND role = ?", (f"{prefix}%", user.role))).fetchone()
+        next_num = (count_row["c"] if count_row else 0) + 1
         new_userid = f"{prefix}{next_num}"
 
-        await conn.execute(
-            'INSERT INTO "user" (name, mail, password, userid, role) VALUES (?, ?, ?, ?, ?)',
-            (user.name, user.mail, user.password, new_userid, user.role)
-        )
+        await conn.execute('INSERT INTO "user" (name, mail, password, userid, role) VALUES (?, ?, ?, ?, ?)',
+                          (user.name, user.mail, user.password, new_userid, user.role))
         await conn.commit()
         return UserResponse(name=user.name, mail=user.mail, userid=new_userid, role=user.role)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
-        if conn:
-            await conn.close()
+        await conn.close()
 
-@app.post("/project/", response_model=ProjectResponse, summary="Create a new project")
+@app.post("/project/", response_model=ProjectResponse)
 async def create_project(project: ProjectCreate):
-    conn = None
+    conn = await get_db_connection()
     try:
-        conn = await get_db_connection()
-        next_projectid = await get_next_projectid(conn)
-        await conn.execute(
-            'INSERT INTO project (projectid, title, startdate, projecttype, description) VALUES (?, ?, ?, ?, ?)',
-            (next_projectid, project.title, project.startdate, project.projecttype, project.description)
-        )
+        pid = await get_next_projectid(conn)
+        await conn.execute('INSERT INTO project (projectid, title, startdate, projecttype, description) VALUES (?, ?, ?, ?, ?)',
+                          (pid, project.title, project.startdate, project.projecttype, project.description))
         await conn.commit()
-        return ProjectResponse(projectid=next_projectid, title=project.title, startdate=project.startdate,
-                              projecttype=project.projecttype, description=project.description)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        return ProjectResponse(projectid=pid, **project.dict())
     finally:
-        if conn:
-            await conn.close()
+        await conn.close()
 
-@app.post("/login/", response_model=LoginResponse, summary="Login and retrieve user projects")
+@app.post("/login/", response_model=LoginResponse)
 async def login_user(login: LoginCreate):
-    conn = None
+    conn = await get_db_connection()
     try:
-        conn = await get_db_connection()
-        user_record = await (await conn.execute(
-            'SELECT userid, role FROM "user" WHERE name = ? AND password = ?',
-            (login.username, login.password)
-        )).fetchone()
-        if not user_record:
+        row = await (await conn.execute('SELECT userid, role FROM "user" WHERE name = ? AND password = ?', (login.username, login.password))).fetchone()
+        if not row:
             raise HTTPException(status_code=401, detail="Invalid username or password")
-        userid = user_record['userid']
-        role = user_record['role']
+        userid, role = row["userid"], row["role"]
         token = jwt.encode({"userid": userid, "role": role}, SECRET_KEY, algorithm=ALGORITHM)
 
-        project_row = await (await conn.execute('SELECT projectid FROM projectuser WHERE userid = ?', (userid,))).fetchone()
-        projectids = _from_json(project_row["projectid"] if project_row else None)
+        row = await (await conn.execute('SELECT projectid FROM projectuser WHERE userid = ?', (userid,))).fetchone()
+        projectids = from_json(row["projectid"] if row else None) if row else []
 
         projects = []
         for pid in projectids:
-            project_record = await (await conn.execute('SELECT projectid, title, startdate, projecttype, description FROM project WHERE projectid = ?', (pid,))).fetchone()
-            if project_record:
-                projects.append(ProjectResponse(**project_record))
+            proj = await (await conn.execute('SELECT * FROM project WHERE projectid = ?', (pid,))).fetchone()
+            if proj:
+                projects.append(ProjectResponse(**proj))
 
         return LoginResponse(userid=userid, role=role, token=token, projects=projects)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
-        if conn:
-            await conn.close()
+        await conn.close()
 
-@app.post("/projectuser/", response_model=BulkAssignmentResponse,
-        summary="Assign project access to users (single or bulk via Excel)")
+@app.post("/projectuser/", response_model=BulkAssignmentResponse)
 async def assign_project_access(
-        current_user: dict = Depends(get_current_user),
-        assignment: Optional[AssignmentCreate] = Body(None),
-        file: Optional[UploadFile] = File(None)
+    current_user: dict = Depends(get_current_user),
+    assignment: Optional[AssignmentCreate] = Body(None),
+    file: Optional[UploadFile] = File(None)
 ):
     if not assignment and not file:
-        raise HTTPException(status_code=400, detail="Either provide JSON body or upload an Excel file.")
-    conn = None
+        raise HTTPException(status_code=400, detail="Provide JSON or Excel")
+    conn = await get_db_connection()
+    assigned = []
     try:
-        conn = await get_db_connection()
-        assigned = []
         if file:
             if not file.filename.endswith('.xlsx'):
-                raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
+                raise HTTPException(status_code=400, detail="Only .xlsx")
             content = await file.read()
             df = pd.read_excel(io.BytesIO(content))
-            required_cols = ['userid', 'projectid']
-            if not all(col in df.columns for col in required_cols):
-                raise HTTPException(status_code=400, detail=f"Excel must have columns: {', '.join(required_cols)}")
-            grouped = df.groupby('userid')['projectid'].apply(lambda x: list(set(str(i) for i in x.dropna()))).to_dict()
-            for target_userid, projectids in grouped.items():
-                if not projectids: continue
-                row = await (await conn.execute('SELECT projectid FROM projectuser WHERE userid = ?', (target_userid,))).fetchone()
-                existing = _from_json(row["projectid"] if row else None)
-                all_pids = list(set(existing + projectids))
-                json_pids = _to_json(all_pids)
+            if not {'userid', 'projectid'}.issubset(df.columns):
+                raise HTTPException(status_code=400, detail="Need userid & projectid columns")
+            for uid, group in df.groupby('userid'):
+                new_pids = [str(x) for x in group['projectid'].dropna().unique()]
+                if not new_pids: continue
+                row = await (await conn.execute("SELECT projectid FROM projectuser WHERE userid = ?", (uid,))).fetchone()
+                existing = from_json(row["projectid"] if row else None)
+                all_pids = list(set(existing + new_pids))
                 if row:
-                    await conn.execute('UPDATE projectuser SET projectid = ? WHERE userid = ?', (json_pids, target_userid))
+                    await conn.execute("UPDATE projectuser SET projectid = ? WHERE userid = ?", (to_json(all_pids), uid))
                 else:
-                    await conn.execute('INSERT INTO projectuser (userid, projectid) VALUES (?, ?)', (target_userid, json_pids))
-                assigned.append(AssignmentResponse(userid=target_userid, projectids=projectids))
+                    await conn.execute("INSERT INTO projectuser (userid, projectid) VALUES (?, ?)", (uid, to_json(all_pids)))
+                assigned.append(AssignmentResponse(userid=uid, projectids=new_pids))
         else:
-            target_userid = assignment.userid
-            projectids = assignment.projectids
-            if not projectids:
-                raise HTTPException(status_code=400, detail="projectids list cannot be empty.")
-            row = await (await conn.execute('SELECT projectid FROM projectuser WHERE userid = ?', (target_userid,))).fetchone()
-            existing = _from_json(row["projectid"] if row else None)
-            all_pids = list(set(existing + projectids))
-            json_pids = _to_json(all_pids)
+            uid = assignment.userid
+            new_pids = assignment.projectids
+            row = await (await conn.execute("SELECT projectid FROM projectuser WHERE userid = ?", (uid,))).fetchone()
+            existing = from_json(row["projectid"] if row else None)
+            all_pids = list(set(existing + new_pids))
             if row:
-                await conn.execute('UPDATE projectuser SET projectid = ? WHERE userid = ?', (json_pids, target_userid))
+                await conn.execute("UPDATE projectuser SET projectid = ? WHERE userid = ?", (to_json(all_pids), uid))
             else:
-                await conn.execute('INSERT INTO projectuser (userid, projectid) VALUES (?, ?)', (target_userid, json_pids))
-            assigned.append(AssignmentResponse(userid=target_userid, projectids=projectids))
+                await conn.execute("INSERT INTO projectuser (userid, projectid) VALUES (?, ?)", (uid, to_json(all_pids)))
+            assigned.append(AssignmentResponse(userid=uid, projectids=new_pids))
 
         await conn.commit()
         return BulkAssignmentResponse(message="Access assigned successfully.", assigned=assigned)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     finally:
-        if conn:
-            await conn.close()
+        await conn.close()
 
 if __name__ == "__main__":
     import uvicorn
