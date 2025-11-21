@@ -1,6 +1,6 @@
 ﻿using System.Windows;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0
 {
     public partial class LoginWindow : Window
     {
@@ -10,4 +10,5 @@ namespace jpmc_genai
             MainFrame.Navigate(new LoginPage());
         }
     }
+
 }
