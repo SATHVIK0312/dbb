@@ -217,3 +217,20 @@ INSERT INTO user (mail, password, userid, role, name) VALUES
 INSERT INTO user (mail, password, userid, role, name) VALUES
 ('abcdef@gmail.com', 'abc123', 'b5', 'role-2', 'sathvik');
 
+----------------------------------------------------------------------25/11/25
+
+CREATE TABLE IF NOT EXISTS testcase (
+    testcaseid TEXT NOT NULL PRIMARY KEY,
+    testdesc TEXT,
+    pretestid TEXT,
+    prereq TEXT,
+    tag TEXT,              -- Store array as JSON string
+    projectid TEXT,        -- Store array as JSON string
+    created_on TEXT,       -- SQLite stores dates as TEXT (ISO format)
+    updated_on TEXT,
+    status TEXT,
+    no_steps INTEGER,
+    last_exe_status TEXT
+);
+
+
