@@ -589,6 +589,100 @@ async def upload_testcases_excel(
     finally:
         await conn.close()
 
+# ====================== NEW ENDPOINT: Get Test Cases for a Project ======================
+@app.get("/projects/{projectid}/testcases")
+async def get_project_testcases(
+    projectid: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # Step 1: Check if user has access to this project
+        row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?", 
+            (userid,)
+        )).fetchone()
+
+        if not row or not row["projectid"]:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_project_ids = from_json(row["projectid"])
+        if projectid not in user_project_ids:
+            raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+        # Step 2: Fetch all test cases for this project
+        # Note: projectid is stored as JSON array string like '["PJ0001"]'
+        rows = await (await conn.execute("""
+            SELECT 
+                testcaseid,
+                testdesc,
+                pretestid,
+                prereq,
+                tag,
+                created_on,
+                created_by
+            FROM testcase 
+            WHERE projectid LIKE ? 
+               OR projectid LIKE ? 
+               OR projectid LIKE ? 
+               OR projectid = ?
+            ORDER BY testcaseid
+        """, (
+            f'%"projectid": "{projectid}"%',     # if stored as object (future)
+            f'[{projectid}]',                    # exact match as array
+            f'%"{projectid}"%',                  # inside array
+            projectid                            # fallback
+        ))).fetchall()
+
+        # Better way: use JSON contains (SQLite 3.38+ supports it)
+        # If your SQLite supports JSON1, use this instead (recommended):
+        try:
+            rows = await (await conn.execute("""
+                SELECT 
+                    testcaseid, testdesc, pretestid, prereq, tag,
+                    created_on, created_by
+                FROM testcase 
+                WHERE json_contains(projectid, ?) 
+                   OR projectid = ?
+                ORDER BY testcaseid
+            """, (f'"{projectid}"', projectid))).fetchall()
+        except:
+            # Fallback for older SQLite
+            rows = await (await conn.execute("""
+                SELECT testcaseid, testdesc, pretestid, prereq, tag, created_on, created_by
+                FROM testcase 
+                WHERE projectid LIKE ?
+                ORDER BY testcaseid
+            """, (f'%{projectid}%',))).fetchall()
+
+        # Step 3: Format response
+        result = []
+        for r in rows:
+            tags = from_json(r["tag"]) if r["tag"] else []
+            result.append({
+                "testcaseid": r["testcaseid"],
+                "testdesc": r["testdesc"] or "",
+                "pretestid": r["pretestid"] or "",
+                "prereq": r["prereq"] or "",
+                "tags": tags,
+                "created_by": r["created_by"] or "unknown",
+                "created_on": r["created_on"] or "",
+                "updated_on": r["created_on"] or ""  # placeholder - can add real column later
+            })
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching test cases: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+            
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8002, log_level="debug")
