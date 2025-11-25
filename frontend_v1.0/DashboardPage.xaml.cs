@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using jpmc_genai.Services;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0
 {
     public partial class DashboardPage : Page
     {
