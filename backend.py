@@ -909,6 +909,96 @@ async def delete_testcase(
         if conn:
             await conn.close()
 
+# ====================== PAGINATED TEST CASES FOR A PROJECT ======================
+@app.get("/projects/{project_id}/testcases/paginated")
+async def get_testcases_paginated(
+    project_id: str,
+    page: int = 1,
+    page_size: int = 10,
+    current_user: dict = Depends(get_current_any_user)
+):
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 10
+    if page_size > 100:
+        page_size = 100  # limit to prevent abuse
+
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # Step 1: Verify user has access to this project
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row or not user_row["projectid"]:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_projects = from_json(user_row["projectid"])
+        if project_id not in user_projects:
+            raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+        # Step 2: Count total test cases in this project
+        count_rows = await (await conn.execute("""
+            SELECT COUNT(*) as total 
+            FROM testcase 
+            WHERE projectid LIKE ?
+        """, (f'%{project_id}%',))).fetchone()
+
+        total_count = count_rows["total"] if count_rows else 0
+        total_pages = (total_count + page_size - 1) // page_size
+        if page > total_pages and total_pages > 0:
+            page = total_pages
+
+        offset = (page - 1) * page_size
+
+        # Step 3: Fetch paginated test cases
+        rows = await (await conn.execute("""
+            SELECT 
+                testcaseid, testdesc, pretestid, prereq, tag,
+                created_on, created_by, no_steps
+            FROM testcase 
+            WHERE projectid LIKE ?
+            ORDER BY testcaseid
+            LIMIT ? OFFSET ?
+        """, (f'%{project_id}%', page_size, offset))).fetchall()
+
+        # Step 4: Build response with steps count (from no_steps column)
+        testcases = []
+        for r in rows:
+            tags = from_json(r["tag"]) if r["tag"] else []
+            testcases.append({
+                "testcaseid": r["testcaseid"],
+                "testdesc": r["testdesc"] or "",
+                "pretestid": r["pretestid"] or "",
+                "prereq": r["prereq"] or "",
+                "tag": tags,
+                "created_by": r["created_by"] or "unknown",
+                "created_on": r["created_on"] or "",
+                "steps_count": r["no_steps"] or 0
+            })
+
+        return {
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "testcases": testcases,
+            "message": "Test cases retrieved successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching test cases: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
 
 if __name__ == "__main__":
     import uvicorn
