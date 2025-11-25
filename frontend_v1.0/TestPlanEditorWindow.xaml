@@ -1,4 +1,4 @@
-<Window x:Class="jpmc_genai.TestPlanEditorWindow"
+<Window x:Class="JPMCGenAI_v1._0.TestPlanEditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Edit Test Plan"
