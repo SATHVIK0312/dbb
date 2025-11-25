@@ -1,0 +1,101 @@
+<Window x:Class="JPMCGenAI_v1._0.TestCaseDetailWindow_Local"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Test Case Details (Staged)"
+        Height="520" Width="900"
+        WindowStartupLocation="CenterOwner"
+        Background="#020617">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- TITLE -->
+        <TextBlock x:Name="TitleLbl"
+                   Grid.Row="0"
+                   FontSize="22"
+                   FontWeight="Bold"
+                   Foreground="#22d3ee"
+                   Text="Loading..."/>
+
+        <!-- META -->
+        <Border Grid.Row="1"
+                Margin="0 8 0 8"
+                Background="#020617"
+                BorderBrush="#1f2937"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0 0 8 0">
+                    <TextBlock Text="Test Case ID:" Foreground="#9ca3af" FontWeight="Bold"/>
+                    <TextBlock x:Name="TcIdText" Foreground="White" Margin="0 2 0 6"/>
+
+                    <TextBlock Text="Description:" Foreground="#9ca3af" FontWeight="Bold"/>
+                    <TextBlock x:Name="DescText" Foreground="White" Margin="0 2 0 6" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Margin="8 0 0 0">
+                    <TextBlock Text="Tags / Pre-reqs:" Foreground="#9ca3af" FontWeight="Bold"/>
+                    <TextBlock x:Name="TagsText" Foreground="White" Margin="0 2 0 6" TextWrapping="Wrap"/>
+
+                    <TextBlock Text="Status:" Foreground="#9ca3af" FontWeight="Bold"/>
+                    <TextBlock x:Name="PrereqText" Foreground="White" Margin="0 2 0 6"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- STEPS -->
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Test Steps"
+                       HorizontalAlignment="Center"
+                       Foreground="#22c55e"
+                       FontSize="18"
+                       FontWeight="Bold"
+                       Margin="0 0 0 6"/>
+
+            <DataGrid x:Name="StepsDataGrid"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      Background="#020617"
+                      Foreground="Red"
+                      BorderBrush="#1f2937">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="#"
+                                        Binding="{Binding Index}"
+                                        Width="40"/>
+                    <DataGridTextColumn Header="Step Description"
+                                        Binding="{Binding Description}"
+                                        Width="*"/>
+                    <DataGridTextColumn Header="Test Data / Expected"
+                                        Binding="{Binding TestDataText}"
+                                        Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </StackPanel>
+
+        <!-- CLOSE -->
+        <StackPanel Grid.Row="3"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0 8 0 0">
+            <Button Content="Close"
+                    Width="120"
+                    Height="32"
+                    Background="#22d3ee"
+                    Foreground="Black"
+                    Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
