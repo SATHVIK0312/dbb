@@ -233,4 +233,22 @@ CREATE TABLE IF NOT EXISTS testcase (
     last_exe_status TEXT
 );
 
+INSERT INTO testcase (
+    testcaseid, testdesc, pretestid, prereq, tag, projectid, 
+    created_on, updated_on, status, no_steps, last_exe_status
+) VALUES (
+    'TC9999',
+    'Random sample test description',
+    'TC0001',
+    'System ready',
+    '["Login", "Smoke"]',
+    '["PJ1234"]',
+    '2025-02-05 10:30:00',
+    '2025-02-05 11:00:00',
+    'Pending',
+    4,
+    'Not Executed'
+);
 
+
+----------------------------------------------
