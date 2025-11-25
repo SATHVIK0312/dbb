@@ -2,7 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 
-namespace JPMXGenAI_v1._0
+namespace JPMCGenAI_v1._0
 {
     public partial class FluxSidebar : UserControl
     {
