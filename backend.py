@@ -48,6 +48,21 @@ from fastapi import File, UploadFile, HTTPException, Depends
 import pandas as pd
 import io
 
+from openai import AzureOpenAI
+import os
+
+# === AZURE OPENAI CONFIGURATION ===
+AZURE_OPENAI_API_KEY = "YOUR_AZURE_OPENAI_API_KEY_HERE"        # Replace
+AZURE_OPENAI_ENDPOINT = "https://your-resource-name.openai.azure.com/"  # Replace
+AZURE_OPENAI_MODEL = "gpt-4o"                                   # or gpt-35-turbo, gpt-4, etc.
+AZURE_OPENAI_API_VERSION = "2024-08-01-preview"                 # Latest stable
+
+# Initialize client once
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
+    api_version=AZURE_OPENAI_API_VERSION,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT
+)
 # ====================== YOUR DATABASE ======================
 DB_URL = "genai.db"  # Change this to full path if needed: r"C:\path\to\genai.db"
 
@@ -1000,11 +1015,7 @@ async def get_testcases_paginated(
             await conn.close()
 
 
-import google.generativeai as genai
-import traceback
-
-# Configure once at startup (add this near the top, after imports)
-genai.configure(api_key="YOUR_GEMINI_API_KEY_HERE")  # Replace with your key or use env var
+#####################################
 
 @app.post("/normalize-uploaded")
 async def normalize_uploaded(
@@ -1020,7 +1031,7 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # Prepare clean input for Gemini
+        # Prepare clean input for Azure OpenAI
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
@@ -1041,13 +1052,12 @@ Rules:
    - If URL → {{"url": "https://..."}}
    - If single value → {{"value": "..."}}
    - If empty → {{}}
-
-Return ONLY a valid JSON array. No explanations.
+4. Return ONLY a valid JSON array. No explanations or markdown.
 
 Input:
 {json.dumps(steps_input, indent=2)}
 
-Output format:
+Output format (exact JSON array):
 [
   {{
     "Index": 1,
@@ -1058,15 +1068,24 @@ Output format:
 ]
 """
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
+        # Call Azure OpenAI
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a precise JSON formatter. Return only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=2000
+        )
+
+        raw_text = response.choices[0].message.content.strip()
 
         # Extract JSON array
         start = raw_text.find("[")
         end = raw_text.rfind("]") + 1
         if start == -1 or end == 0:
-            raise HTTPException(status_code=500, detail="AI did not return valid JSON")
+            raise HTTPException(status_code=500, detail="AI did not return valid JSON array")
 
         try:
             normalized_raw = json.loads(raw_text[start:end])
@@ -1094,13 +1113,13 @@ Output format:
             "testcaseid": testcase_id,
             "original_steps": original_steps,
             "normalized_steps": normalized_steps,
-            "message": "Steps normalized successfully by AI"
+            "message": "Steps normalized successfully using Azure OpenAI"
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] Normalization failed: {e}\n{traceback.format_exc()}")
+        print(f"[ERROR] Azure OpenAI Normalization failed: {e}")
         raise HTTPException(status_code=500, detail="AI normalization failed")
 
 
