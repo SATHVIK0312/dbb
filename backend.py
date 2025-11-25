@@ -752,6 +752,163 @@ async def get_testcase_steps(
         if conn:
             await conn.close()
 
+# ====================== UPDATE TESTCASE + STEPS ======================
+@app.put("/testcases/{testcase_id}")
+async def update_testcase(
+    testcase_id: str,
+    file: UploadFile = File(...),  # Reuse Excel format for simplicity
+    current_user: dict = Depends(get_current_any_user)
+):
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files allowed")
+
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # 1. Check if test case exists and user has access
+        tc_row = await (await conn.execute(
+            "SELECT projectid FROM testcase WHERE testcaseid = ?", (testcase_id,)
+        )).fetchone()
+
+        if not tc_row:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        project_ids = from_json(tc_row["projectid"])
+        user_projects_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?", (userid,)
+        )).fetchone()
+
+        if not user_projects_row:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        user_projects = from_json(user_projects_row["projectid"])
+        if not any(p in user_projects for p in project_ids):
+            raise HTTPException(status_code=403, detail="You do not have access to update this test case")
+
+        # 2. Read new data from Excel (same format as upload)
+        content = await file.read()
+        df = pd.read_excel(io.BytesIO(content))
+
+        expected = {"Test Case ID", "Test Case Description", "Pre requisite Test ID",
+                    "Pre requisite Test Description", "Tags", "Test Steps", "Arguments"}
+        if not expected.issubset(set(df.columns)):
+            raise HTTPException(status_code=400, detail=f"Missing columns: {expected - set(df.columns)}")
+
+        # 3. Parse only the matching testcase_id
+        new_desc = new_pretestid = new_prereq = ""
+        new_tags = []
+        new_steps = []
+        new_args = []
+
+        for _, row in df.iterrows():
+            row_id = str(row["Test Case ID"] or "").strip()
+            if row_id != testcase_id:
+                continue  # skip others
+
+            new_desc = str(row["Test Case Description"] or "") if pd.notna(row["Test Case Description"]) else ""
+            new_pretestid = str(row["Pre requisite Test ID"] or "") if pd.notna(row["Pre requisite Test ID"]) else ""
+            new_prereq = str(row["Pre requisite Test Description"] or "") if pd.notna(row["Pre requisite Test Description"]) else ""
+
+            tags_raw = str(row["Tags"] or "") if pd.notna(row["Tags"]) else ""
+            new_tags = [t.strip() for t in tags_raw.split(",") if t.strip() and t.strip() != "nan"]
+
+            # Collect all steps
+            if pd.notna(row["Test Steps"]):
+                new_steps.append(str(row["Test Steps"]))
+                new_args.append(str(row["Arguments"] or "") if pd.notna(row["Arguments"]) else "")
+
+            # Handle continuation rows
+            if pd.isna(row["Test Case ID"]) or row_id in ["", "nan"]:
+                if pd.notna(row["Test Steps"]):
+                    new_steps.append(str(row["Test Steps"]))
+                    new_args.append(str(row["Arguments"] or "") if pd.notna(row["Arguments"]) else "")
+
+        if not new_steps:
+            raise HTTPException(status_code=400, detail="No steps found in uploaded file")
+
+        # 4. Update testcase and teststep
+        no_steps = len(new_steps)
+
+        await conn.execute("""
+            UPDATE testcase SET
+                testdesc = ?, pretestid = ?, prereq = ?, tag = ?,
+                no_steps = ?, created_on = datetime('now'), created_by = ?
+            WHERE testcaseid = ?
+        """, (new_desc, new_pretestid, new_prereq, to_json(new_tags), no_steps, userid, testcase_id))
+
+        await conn.execute("""
+            INSERT OR REPLACE INTO teststep (testcaseid, steps, args, stepnum)
+            VALUES (?, ?, ?, ?)
+        """, (testcase_id, to_json(new_steps), to_json(new_args), no_steps))
+
+        await conn.commit()
+        return {
+            "message": "Test case updated successfully",
+            "testcaseid": testcase_id,
+            "steps_updated": no_steps
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            await conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
+
+# ====================== DELETE TESTCASE + STEPS ======================
+@app.delete("/testcases/{testcase_id}")
+async def delete_testcase(
+    testcase_id: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # 1. Check access
+        tc_row = await (await conn.execute(
+            "SELECT projectid FROM testcase WHERE testcaseid = ?", (testcase_id,)
+        )).fetchone()
+
+        if not tc_row:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        project_ids = from_json(tc_row["projectid"])
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?", (userid,)
+        )).fetchone()
+
+        if not user_row:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        user_projects = from_json(user_row["projectid"])
+        if not any(p in user_projects for p in project_ids):
+            raise HTTPException(status_code=403, detail="You cannot delete this test case")
+
+        # 2. Delete from both tables
+        await conn.execute("DELETE FROM teststep WHERE testcaseid = ?", (testcase_id,))
+        await conn.execute("DELETE FROM testcase WHERE testcaseid = ?", (testcase_id,))
+
+        await conn.commit()
+        return {"message": f"Test case {testcase_id} and its steps deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            await conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
 
 if __name__ == "__main__":
     import uvicorn
