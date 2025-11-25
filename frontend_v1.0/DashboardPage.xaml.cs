@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using jpmc_genai.Services;
 
 namespace JPMCGenAI_v1._0
@@ -17,38 +20,13 @@ namespace JPMCGenAI_v1._0
         {
             InitializeComponent();
             _projectId = projectId;
+            var project = Session.CurrentUser?.projects?.FirstOrDefault(p => p.projectid == projectId);
+            ProjectTitleTextBlock.Text = project?.title ?? "Project";
+            ProjectDetailsTextBlock.Text = $"ID: {projectId}\nType: {project?.projecttype}\nStarted: {project?.startdate}";
 
-            // Update sidebar project info
-            if (FindName("Sidebar") is FluxSidebar sidebar)
-            {
-                var project = Session.CurrentUser?.projects?.FirstOrDefault(p => p.projectid == projectId);
-                sidebar.UpdateProjectInfo(project?.title ?? "Unknown Project", $"ID: {projectId}");
-            }
-
+            // Initialize asynchronously
             _ = LoadSummaryAsync();
         }
-
-        public ICommand NavigateCommand => new RelayCommand(param =>
-        {
-            switch (param?.ToString())
-            {
-                case "UploadTestCase":
-                    NavigationService?.Navigate(new UploadTestCasePage());
-                    break;
-                case "AITestExecutor":
-                    NavigationService?.Navigate(new AITestExecutorPage(_projectId));
-                    break;
-                case "ScriptGenerator":
-                    NavigationService?.Navigate(new ScriptGeneratorPage());
-                    break;
-                case "ExecutionLog":
-                    NavigationService?.Navigate(new ExecutionLogPage());
-                    break;
-                case "ChangeProject":
-                    NavigationService?.Navigate(new ProjectPage());
-                    break;
-            }
-        });
 
         private async Task LoadSummaryAsync()
         {
@@ -56,35 +34,47 @@ namespace JPMCGenAI_v1._0
             {
                 using var client = new ApiClient();
                 client.SetBearer(Session.Token);
-                var resp = await client.GetAsync($"projects/{_projectId}/summary");
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-                if (resp.IsSuccessStatusCode)
+                var summaryResp = await client.GetAsync($"projects/{_projectId}/summary");
+
+                var summaryJson = await summaryResp.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] API Response Status: {summaryResp.StatusCode}");
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] API Response Content: {summaryJson}");
+
+                if (summaryResp.IsSuccessStatusCode)
                 {
-                    var json = await resp.Content.ReadAsStringAsync();
-                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    var summary = JsonSerializer.Deserialize<ProjectSummary>(json, options);
+                    var summary = JsonSerializer.Deserialize<ProjectSummary>(summaryJson, options);
+
+                    System.Diagnostics.Debug.WriteLine($"[DEBUG] Deserialized Summary: users={summary?.users_count}, testcases={summary?.testcases_count}");
 
                     if (summary != null)
                     {
-                        UsersCountTextBlock.Text = summary.users_count.ToString("N0");
-                        TestCasesCountTextBlock.Text = summary.testcases_count.ToString("N0");
-                        TotalExecutionsTextBlock.Text = summary.total_executions.ToString("N0");
-                        SuccessfulExecutionsTextBlock.Text = $"{summary.successful_executions} Passed";
-                        FailedExecutionsTextBlock.Text = $"{summary.failed_executions} Failed";
+                        UsersCountTextBlock.Text = summary.users_count.ToString();
+                        TestCasesCountTextBlock.Text = summary.testcases_count.ToString();
+                        TotalExecutionsTextBlock.Text = summary.total_executions.ToString();
+                        SuccessfulExecutionsTextBlock.Text = summary.successful_executions.ToString();
+                        FailedExecutionsTextBlock.Text = summary.failed_executions.ToString();
+                    }
+                    else
+                    {
+                        SetDefaultSummaryValues();
                     }
                 }
                 else
                 {
-                    SetPlaceholder();
+                    System.Diagnostics.Debug.WriteLine($"[DEBUG] API call failed with status: {summaryResp.StatusCode}");
+                    SetDefaultSummaryValues();
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                SetPlaceholder();
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] Exception in LoadSummaryAsync: {ex.Message}");
+                SetDefaultSummaryValues();
             }
         }
 
-        private void SetPlaceholder()
+        private void SetDefaultSummaryValues()
         {
             UsersCountTextBlock.Text = "—";
             TestCasesCountTextBlock.Text = "—";
@@ -93,23 +83,49 @@ namespace JPMCGenAI_v1._0
             FailedExecutionsTextBlock.Text = "—";
         }
 
+        private void BackToProjects_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ProjectPage());
+        }
+
+        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new AITestExecutorPage(_projectId));
+        }
+
+        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ScriptGeneratorPage());
+        }
+
+        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ExecutionLogPage());
+        }
+
+        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new UploadTestCasePage());
+        }
+
+        private void ChangeProject_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ProjectPage());
+        }
+
         private class ProjectSummary
         {
+            public string projectid { get; set; } = string.Empty;
             public int users_count { get; set; }
             public int testcases_count { get; set; }
             public int total_executions { get; set; }
             public int successful_executions { get; set; }
             public int failed_executions { get; set; }
         }
-    }
 
-    // Simple RelayCommand (add this once in your project)
-    public class RelayCommand : ICommand
-    {
-        private readonly Action<object> _execute;
-        public event EventHandler CanExecuteChanged;
-        public RelayCommand(Action<object> execute) => _execute = execute;
-        public bool CanExecute(object parameter) => true;
-        public void Execute(object parameter) => _execute(parameter);
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
+
+        }
     }
 }
