@@ -1238,6 +1238,58 @@ async def get_testcase_details(
             await conn.close()
             
 
+
+
+
+# ====================== TEST AZURE OPENAI CONNECTION ======================
+@app.get("/test-azure-openai")
+async def test_azure_openai(
+    current_user: dict = Depends(get_current_any_user)  # Optional: remove if you want public test
+):
+    """
+    Simple health check for Azure OpenAI.
+    Returns success message if deployment is reachable and working.
+    """
+    try:
+        # This uses the same client as your normalize endpoint
+        response = client.chat.completions.create(
+            deployment_id=AZURE_OPENAI_DEPLOYMENT,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Say exactly: AZURE_OPENAI_IS_WORKING"}
+            ],
+            max_tokens=20,
+            temperature=0
+        )
+
+        result = response.choices[0].message.content.strip()
+        
+        return {
+            "status": "success",
+            "message": "Azure OpenAI is working perfectly!",
+            "model_response": result,
+            "deployment": AZURE_OPENAI_DEPLOYMENT,
+            "endpoint": AZURE_OPENAI_ENDPOINT
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        status_code = 500
+
+        if "401" in error_msg or "Unauthorized" in error_msg:
+            status_code = 401
+            error_msg = "Authentication failed → Check API key"
+        elif "404" in error_msg or "not found" in error_msg.lower():
+            status_code = 404
+            error_msg = "Deployment not found → Check DEPLOYMENT NAME"
+        elif "timeout" in error_msg.lower() or "connection" in error_msg.lower():
+            status_code = 504
+            error_msg = "Network timeout → Are you on VPN? Is endpoint reachable?"
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Azure OpenAI failed: {error_msg}"
+        )
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8002, log_level="debug")
