@@ -1000,6 +1000,225 @@ async def get_testcases_paginated(
             await conn.close()
 
 
+import google.generativeai as genai
+import traceback
+
+# Configure once at startup (add this near the top, after imports)
+genai.configure(api_key="YOUR_GEMINI_API_KEY_HERE")  # Replace with your key or use env var
+
+@app.post("/normalize-uploaded")
+async def normalize_uploaded(
+    payload: dict = Body(...),
+    current_user: dict = Depends(get_current_any_user)
+):
+    try:
+        testcase_id = payload.get("testcaseid")
+        original_steps = payload.get("original_steps", [])
+
+        if not testcase_id:
+            raise HTTPException(status_code=400, detail="testcaseid is required")
+        if not original_steps:
+            raise HTTPException(status_code=400, detail="original_steps cannot be empty")
+
+        # Prepare clean input for Gemini
+        steps_input = []
+        for i, step in enumerate(original_steps):
+            idx = step.get("Index", i + 1)
+            text = step.get("Step", "").strip()
+            data_text = step.get("TestDataText", "").strip()
+            steps_input.append({"Index": idx, "Step": text, "TestDataText": data_text})
+
+        prompt = f"""
+You are an expert QA automation engineer specializing in clean, atomic, BDD-style test steps.
+
+Given the following raw test steps from an Excel upload, normalize them as follows:
+
+Rules:
+1. Rewrite each Step into clear, actionable, BDD-style (Given/When/Then)
+2. Keep TestDataText as human-readable string
+3. Infer structured TestData JSON object:
+   - If email + password → {{"username": "...", "password": "..."}}
+   - If URL → {{"url": "https://..."}}
+   - If single value → {{"value": "..."}}
+   - If empty → {{}}
+
+Return ONLY a valid JSON array. No explanations.
+
+Input:
+{json.dumps(steps_input, indent=2)}
+
+Output format:
+[
+  {{
+    "Index": 1,
+    "Step": "When the user enters valid credentials and clicks login",
+    "TestDataText": "user@example.com, password123",
+    "TestData": {{"username": "user@example.com", "password": "password123"}}
+  }}
+]
+"""
+
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        raw_text = response.text.strip()
+
+        # Extract JSON array
+        start = raw_text.find("[")
+        end = raw_text.rfind("]") + 1
+        if start == -1 or end == 0:
+            raise HTTPException(status_code=500, detail="AI did not return valid JSON")
+
+        try:
+            normalized_raw = json.loads(raw_text[start:end])
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
+
+        # Validate and clean output
+        normalized_steps = []
+        for i, item in enumerate(normalized_raw):
+            step_text = str(item.get("Step", "") or "").strip()
+            data_text = str(item.get("TestDataText", "") or "").strip()
+            test_data = item.get("TestData", {})
+
+            if not isinstance(test_data, dict):
+                test_data = {"value": str(test_data)} if test_data else {}
+
+            normalized_steps.append({
+                "Index": item.get("Index", i + 1),
+                "Step": step_text,
+                "TestDataText": data_text,
+                "TestData": test_data
+            })
+
+        return {
+            "testcaseid": testcase_id,
+            "original_steps": original_steps,
+            "normalized_steps": normalized_steps,
+            "message": "Steps normalized successfully by AI"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Normalization failed: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="AI normalization failed")
+
+
+@app.get("/testcases/details")
+async def get_testcase_details(
+    testcaseids: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    if not testcaseids:
+        raise HTTPException(status_code=400, detail="testcaseids parameter is required")
+
+    ids = [tid.strip() for tid in testcaseids.split(",") if tid.strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No valid test case IDs provided")
+
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # Get user's assigned projects
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?", (userid,)
+        )).fetchone()
+
+        if not user_row or not user_row["projectid"]:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_projects = set(from_json(user_row["projectid"]))
+        scenarios = []
+
+        for tcid in ids:
+            # Fetch test case
+            tc = await (await conn.execute(
+                "SELECT testdesc, pretestid, prereq, tag, projectid FROM testcase WHERE testcaseid = ?",
+                (tcid,)
+            )).fetchone()
+
+            if not tc:
+                continue  # Skip missing
+
+            tc_projects = set(from_json(tc["projectid"]))
+            if not (tc_projects & user_projects):
+                raise HTTPException(status_code=403, detail=f"No access to test case {tcid}")
+
+            # Prerequisites
+            prerequisites = []
+            if tc["pretestid"]:
+                pre_row = await (await conn.execute(
+                    "SELECT testdesc FROM testcase WHERE testcaseid = ?", (tc["pretestid"],)
+                )).fetchone()
+                if pre_row:
+                    prerequisites.append({
+                        "PrerequisiteID": tc["pretestid"],
+                        "Description": pre_row["testdesc"] or ""
+                    })
+
+            # Fetch steps
+            steps_row = await (await conn.execute(
+                "SELECT steps, args FROM teststep WHERE testcaseid = ?", (tcid,)
+            )).fetchone()
+
+            if not steps_row or not steps_row["steps"]:
+                steps_list = []
+                args_list = []
+            else:
+                steps_list = from_json(steps_row["steps"])
+                args_list = from_json(steps_row["args"])
+
+            # Build steps with TestData
+            steps = []
+            for idx, (step_text, arg) in enumerate(zip(steps_list, args_list), 1):
+                # Simple extraction: if step contains "username", "password", etc.
+                test_data = {}
+                test_data_text = arg
+
+                if arg and "," in arg:
+                    parts = [p.strip() for p in arg.split(",")]
+                    if len(parts) == 2:
+                        test_data = {"username": parts[0], "password": parts[1]}
+                    elif "http" in arg:
+                        test_data = {"url": arg}
+                    else:
+                        test_data = {"value": arg}
+                elif arg:
+                    test_data = {"value": arg}
+
+                steps.append({
+                    "Index": idx,
+                    "Step": step_text,
+                    "TestDataText": test_data_text,
+                    "TestData": test_data
+                })
+
+            scenarios.append({
+                "ScenarioId": tcid,
+                "Description": tc["testdesc"] or "",
+                "Prerequisites": prerequisites,
+                "IsBdd": True,
+                "Status": "draft",
+                "Steps": steps
+            })
+
+        if not scenarios:
+            raise HTTPException(status_code=404, detail="No accessible test cases found")
+
+        return {"Scenarios": scenarios}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] get_testcase_details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch test case details")
+    finally:
+        if conn:
+            await conn.close()
+            
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8002, log_level="debug")
