@@ -44,6 +44,9 @@ from fastapi.security import HTTPBearer
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import File, UploadFile, HTTPException, Depends
+import pandas as pd
+import io
 
 # ====================== YOUR DATABASE ======================
 DB_URL = "genai.db"  # Change this to full path if needed: r"C:\path\to\genai.db"
@@ -268,6 +271,19 @@ async def get_next_testcaseid(conn):
     num = int(row["testcaseid"][2:]) + 1
     return f"TC{num:04d}"
 
+def to_json(val): 
+    import json as json_lib
+    return json_lib.dumps(val or [])
+
+def from_json(val):
+    import json as json_lib
+    if not val or val == "[]": 
+        return []
+    try: 
+        return json_lib.loads(val)
+    except: 
+        return []
+
 # ====================== JWT ======================
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
@@ -437,6 +453,145 @@ async def get_my_projects(current_user: dict = Depends(get_current_any_user)):
     finally:
         if conn:
             await conn.close()
+
+#################################################################
+
+@app.post("/upload-testcases")
+async def upload_testcases_excel(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)   # admin only, or use get_current_any_user if you want
+):
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files are allowed")
+
+    content = await file.read()
+    df = pd.read_excel(io.BytesIO(content))
+
+    expected_cols = {
+        "Test Case ID", "Test Case Description", "Pre requisite Test ID",
+        "Pre requisite Test Description", "Tags", "Test Steps", "Arguments"
+    }
+    if not expected_cols.issubset(set(df.columns)):
+        raise HTTPException(status_code=400,
+                            detail=f"Excel must contain columns: {', '.join(expected_cols)}")
+
+    conn = await get_db_connection()
+    try:
+        created = 0
+        updated = 0
+
+        current_tc = None
+        steps_list = []
+        args_list = []
+
+        for _, row in df.iterrows():
+            tc_id = str(row["Test Case ID"]).strip()
+            if pd.isna(row["Test Case ID"]) or tc_id == "" or tc_id == "nan":
+                # continuation row – same test case
+                if current_tc is None:
+                    continue  # safety
+                step_desc = str(row["Test Steps"]) if not pd.isna(row["Test Steps"]) else ""
+                arg_val  = str(row["Arguments"]) if not pd.isna(row["Arguments"]) else ""
+                steps_list.append(step_desc)
+                args_list.append(arg_val)
+                continue
+
+            # ---- New test case starts here ----
+            # First save the previous one (if any)
+            if current_tc:
+                no_steps = len(steps_list)
+                # upsert testcase
+                await conn.execute("""
+                    INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, no_steps)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(testcaseid) DO UPDATE SET
+                        testdesc=excluded.testdesc,
+                        pretestid=excluded.pretestid,
+                        prereq=excluded.prereq,
+                        tag=excluded.tag,
+                        no_steps=excluded.no_steps
+                """, (current_tc["id"], current_tc["desc"], current_tc["pretestid"],
+                      current_tc["prereq"], to_json(current_tc["tags"]), no_steps))
+
+                # upsert teststep
+                await conn.execute("""
+                    INSERT INTO teststep (testcaseid, steps, args, stepnum)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(testcaseid) DO UPDATE SET
+                        steps=excluded.steps,
+                        args=excluded.args,
+                        stepnum=excluded.stepnum
+                """, (current_tc["id"], to_json(steps_list), to_json(args_list), no_steps))
+
+                if current_tc.get("new"):
+                    created += 1
+                else:
+                    updated += 1
+
+            # Start collecting new test case
+            tags_raw = row["Tags"]
+            tags = [t.strip() for t in str(tags_raw).split(",") if t.strip() and t.strip() != "nan"]
+
+            current_tc = {
+                "id": tc_id,
+                "desc": str(row["Test Case Description"]) if not pd.isna(row["Test Case Description"]) else "",
+                "pretestid": str(row["Pre requisite Test ID"]) if not pd.isna(row["Pre requisite Test ID"]) else "",
+                "prereq": str(row["Pre requisite Test Description"]) if not pd.isna(row["Pre requisite Test Description"]) else "",
+                "tags": tags,
+                "new": True
+            }
+            steps_list = []
+            args_list = []
+
+            # add the first step if it exists on the same row
+            step_desc = str(row["Test Steps"]) if not pd.isna(row["Test Steps"]) else ""
+            arg_val  = str(row["Arguments"]) if not pd.isna(row["Arguments"]) else ""
+            if step_desc:
+                steps_list.append(step_desc)
+                args_list.append(arg_val)
+
+        # ---- Save the very last test case ----
+        if current_tc:
+            no_steps = len(steps_list)
+            await conn.execute("""
+                INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, no_steps)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(testcaseid) DO UPDATE SET
+                    testdesc=excluded.testdesc,
+                    pretestid=excluded.pretestid,
+                    prereq=excluded.prereq,
+                    tag=excluded.tag,
+                    no_steps=excluded.no_steps
+            """, (current_tc["id"], current_tc["desc"], current_tc["pretestid"],
+                  current_tc["prereq"], to_json(current_tc["tags"]), no_steps))
+
+            await conn.execute("""
+                INSERT INTO teststep (testcaseid, steps, args, stepnum)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(testcaseid) DO UPDATE SET
+                    steps=excluded.steps,
+                    args=excluded.args,
+                    stepnum=excluded.stepnum
+            """, (current_tc["id"], to_json(steps_list), to_json(args_list), no_steps))
+
+            if current_tc.get("new"):
+                created += 1
+            else:
+                updated += 1
+
+        await conn.commit()
+        return {
+            "message": "Test cases uploaded successfully",
+            "created": created,
+            "updated": updated
+        }
+
+    except Exception as e:
+        await conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    finally:
+        await conn.close()
+        
 
 if __name__ == "__main__":
     import uvicorn
