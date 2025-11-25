@@ -459,9 +459,9 @@ async def get_my_projects(current_user: dict = Depends(get_current_any_user)):
 @app.post("/upload-testcases")
 async def upload_testcases_excel(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)   # admin only, or use get_current_any_user if you want
+    current_user: dict = Depends(get_current_any_user)   # Any logged-in user
 ):
-    if not file.filename.endswith(('.xlsx', '.xls')):
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files are allowed")
 
     content = await file.read()
@@ -475,115 +475,112 @@ async def upload_testcases_excel(
         raise HTTPException(status_code=400,
                             detail=f"Excel must contain columns: {', '.join(expected_cols)}")
 
+    # Get the user's currently assigned projects
     conn = await get_db_connection()
     try:
-        created = 0
-        updated = 0
+        user_id = current_user["userid"]
+        row = await (await conn.execute("SELECT projectid FROM projectuser WHERE userid = ?", (user_id,))).fetchone()
+        user_projects = from_json(row["projectid"]) if row and row["projectid"] else []
+        
+        if not user_projects:
+            raise HTTPException(status_code=400, detail="You are not assigned to any project!")
 
+        # Take the FIRST project as current active project (or you can make logic for last used, etc.)
+        current_project_id = user_projects[0]
+
+        created_count = 0
         current_tc = None
         steps_list = []
         args_list = []
 
         for _, row in df.iterrows():
-            tc_id = str(row["Test Case ID"]).strip()
-            if pd.isna(row["Test Case ID"]) or tc_id == "" or tc_id == "nan":
-                # continuation row – same test case
-                if current_tc is None:
-                    continue  # safety
-                step_desc = str(row["Test Steps"]) if not pd.isna(row["Test Steps"]) else ""
-                arg_val  = str(row["Arguments"]) if not pd.isna(row["Arguments"]) else ""
-                steps_list.append(step_desc)
-                args_list.append(arg_val)
+            tc_id_raw = row["Test Case ID"]
+            if pd.isna(tc_id_raw) or str(tc_id_raw).strip() in ["", "nan"]:
+                if current_tc:
+                    step_desc = str(row["Test Steps"]) if pd.notna(row["Test Steps"]) else ""
+                    arg_val = str(row["Arguments"]) if pd.notna(row["Arguments"]) else ""
+                    steps_list.append(step_desc)
+                    args_list.append(arg_val)
                 continue
 
-            # ---- New test case starts here ----
-            # First save the previous one (if any)
+            # Save previous test case
             if current_tc:
                 no_steps = len(steps_list)
-                # upsert testcase
                 await conn.execute("""
-                    INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, no_steps)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO testcase 
+                    (testcaseid, testdesc, pretestid, prereq, tag, projectid, no_steps, created_on, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
                     ON CONFLICT(testcaseid) DO UPDATE SET
                         testdesc=excluded.testdesc,
                         pretestid=excluded.pretestid,
                         prereq=excluded.prereq,
                         tag=excluded.tag,
-                        no_steps=excluded.no_steps
+                        projectid=excluded.projectid,
+                        no_steps=excluded.no_steps,
+                        created_on=datetime('now'),
+                        created_by=excluded.created_by
                 """, (current_tc["id"], current_tc["desc"], current_tc["pretestid"],
-                      current_tc["prereq"], to_json(current_tc["tags"]), no_steps))
+                      current_tc["prereq"], to_json(current_tc["tags"]), to_json([current_project_id]),
+                      no_steps, user_id))
 
-                # upsert teststep
                 await conn.execute("""
-                    INSERT INTO teststep (testcaseid, steps, args, stepnum)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO teststep (testcaseid, steps, args, stepnum, created_on)
+                    VALUES (?, ?, ?, ?, datetime('now'))
                     ON CONFLICT(testcaseid) DO UPDATE SET
-                        steps=excluded.steps,
-                        args=excluded.args,
-                        stepnum=excluded.stepnum
+                        steps=excluded.steps, args=excluded.args, stepnum=excluded.stepnum
                 """, (current_tc["id"], to_json(steps_list), to_json(args_list), no_steps))
 
-                if current_tc.get("new"):
-                    created += 1
-                else:
-                    updated += 1
+                created_count += 1
 
-            # Start collecting new test case
-            tags_raw = row["Tags"]
-            tags = [t.strip() for t in str(tags_raw).split(",") if t.strip() and t.strip() != "nan"]
+            # New test case
+            tc_id = str(tc_id_raw).strip()
+            tags_raw = str(row["Tags"]) if pd.notna(row["Tags"]) else ""
+            tags = [t.strip() for t in tags_raw.split(",") if t.strip() and t.strip() != "nan"]
 
             current_tc = {
                 "id": tc_id,
-                "desc": str(row["Test Case Description"]) if not pd.isna(row["Test Case Description"]) else "",
-                "pretestid": str(row["Pre requisite Test ID"]) if not pd.isna(row["Pre requisite Test ID"]) else "",
-                "prereq": str(row["Pre requisite Test Description"]) if not pd.isna(row["Pre requisite Test Description"]) else "",
-                "tags": tags,
-                "new": True
+                "desc": str(row["Test Case Description"]) if pd.notna(row["Test Case Description"]) else "",
+                "pretestid": str(row["Pre requisite Test ID"]) if pd.notna(row["Pre requisite Test ID"]) else "",
+                "prereq": str(row["Pre requisite Test Description"]) if pd.notna(row["Pre requisite Test Description"]) else "",
+                "tags": tags
             }
             steps_list = []
             args_list = []
 
-            # add the first step if it exists on the same row
-            step_desc = str(row["Test Steps"]) if not pd.isna(row["Test Steps"]) else ""
-            arg_val  = str(row["Arguments"]) if not pd.isna(row["Arguments"]) else ""
-            if step_desc:
-                steps_list.append(step_desc)
-                args_list.append(arg_val)
+            if pd.notna(row["Test Steps"]):
+                steps_list.append(str(row["Test Steps"]))
+                args_list.append(str(row["Arguments"]) if pd.notna(row["Arguments"]) else "")
 
-        # ---- Save the very last test case ----
+        # Save the last one
         if current_tc:
             no_steps = len(steps_list)
             await conn.execute("""
-                INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, no_steps)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO testcase 
+                (testcaseid, testdesc, pretestid, prereq, tag, projectid, no_steps, created_on, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
                 ON CONFLICT(testcaseid) DO UPDATE SET
-                    testdesc=excluded.testdesc,
-                    pretestid=excluded.pretestid,
-                    prereq=excluded.prereq,
-                    tag=excluded.tag,
-                    no_steps=excluded.no_steps
+                    testdesc=excluded.testdesc, pretestid=excluded.pretestid,
+                    prereq=excluded.prereq, tag=excluded.tag,
+                    projectid=excluded.projectid, no_steps=excluded.no_steps,
+                    created_on=datetime('now'), created_by=excluded.created_by
             """, (current_tc["id"], current_tc["desc"], current_tc["pretestid"],
-                  current_tc["prereq"], to_json(current_tc["tags"]), no_steps))
+                  current_tc["prereq"], to_json(current_tc["tags"]), to_json([current_project_id]),
+                  no_steps, user_id))
 
             await conn.execute("""
-                INSERT INTO teststep (testcaseid, steps, args, stepnum)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO teststep (testcaseid, steps, args, stepnum, created_on)
+                VALUES (?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(testcaseid) DO UPDATE SET
-                    steps=excluded.steps,
-                    args=excluded.args,
-                    stepnum=excluded.stepnum
+                    steps=excluded.steps, args=excluded.args, stepnum=excluded.stepnum
             """, (current_tc["id"], to_json(steps_list), to_json(args_list), no_steps))
-
-            if current_tc.get("new"):
-                created += 1
-            else:
-                updated += 1
+            created_count += 1
 
         await conn.commit()
         return {
-            "message": "Test cases uploaded successfully",
-            "created": created,
-            "updated": updated
+            "message": "Test cases uploaded successfully!",
+            "project_used": current_project_id,
+            "created_count": created_count,
+            "created_by": user_id
         }
 
     except Exception as e:
@@ -591,7 +588,6 @@ async def upload_testcases_excel(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     finally:
         await conn.close()
-        
 
 if __name__ == "__main__":
     import uvicorn
