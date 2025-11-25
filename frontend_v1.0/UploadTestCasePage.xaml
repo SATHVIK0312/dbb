@@ -1,0 +1,265 @@
+<Page x:Class="JPMCGenAI_v1._0.UploadTestCasePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      mc:Ignorable="d"
+      d:DesignHeight="1400" d:DesignWidth="1400"
+      Background="#FAF9F6"
+      Title="Manage Test Cases">
+
+    <Page.Resources>
+        <Style TargetType="Button" x:Key="SidebarButtonTheme">
+            <Setter Property="Background" Value="#FFF6EC"/>
+            <Setter Property="Foreground" Value="#333"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Width" Value="150"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="BorderBrush" Value="#D4AF37"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"  CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#D4AF37"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Button" x:Key="ActiveSidebarButtonTheme" BasedOn="{StaticResource SidebarButtonTheme}">
+            <Setter Property="IsEnabled" Value="False"/>
+            <Setter Property="Foreground" Value="#D4AF37"/>
+            <Setter Property="BorderBrush" Value="#D4AF37"/>
+        </Style>
+
+        <Style x:Key="ModernCard" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="18"/>
+            <Setter Property="BorderBrush" Value="#E2E1DC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="12"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect BlurRadius="16" Opacity="0.12" ShadowDepth="6"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GoldActionButton" TargetType="Button">
+            <Setter Property="Background" Value="#D4AF37"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="20,12"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#B8952D"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#CCCCCC"/>
+                                <Setter Property="Foreground" Value="#888888"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CenterCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="240"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- SIDEBAR -->
+        <Border Grid.Column="0" Background="#F8F6F2" BorderBrush="#D4AF37" BorderThickness="0,0,2,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Border Background="#D4AF37" Padding="18">
+                    <TextBlock Text="JPMC Flux" Foreground="White" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center"/>
+                </Border>
+
+                <StackPanel Grid.Row="1" Margin="20,25,20,10">
+                    <Button Content="Project Dashboard" Click="Dashboard_Click" Style="{StaticResource SidebarButtonTheme}" Margin="0,0,0,12"/>
+                    <Button Content="Manage Test Case" Style="{StaticResource ActiveSidebarButtonTheme}" Margin="0,0,0,12"/>
+                    <Button Content="Smart Executor" Click="AITestExecutor_Click" Style="{StaticResource SidebarButtonTheme}" Margin="0,0,0,12"/>
+                    <Button Content="Script Generator" Click="ScriptGenerator_Click" Style="{StaticResource SidebarButtonTheme}" Margin="0,0,0,12"/>
+                    <Button Content="Execution Log" Click="ExecutionLog_Click" Style="{StaticResource SidebarButtonTheme}" Margin="0,0,0,12"/>
+                </StackPanel>
+
+                <Border Grid.Row="2" Margin="15,20" Padding="18" Background="White" CornerRadius="12">
+                    <StackPanel>
+                        <TextBlock x:Name="ProjectTitleTextBlock" Foreground="#333" FontWeight="Bold" FontSize="20" Margin="0,0,0,5"/>
+                        <TextBlock x:Name="ProjectDetailsTextBlock" Foreground="#8C8575" FontSize="11"/>
+                        <Button Content="Change Project" Click="ChangeProject_Click" Style="{StaticResource SidebarButtonTheme}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- MAIN CONTENT -->
+        <ScrollViewer Grid.Column="1" Margin="30,25" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <TextBlock Text="Manage Test Cases" FontSize="32" FontWeight="Bold" Foreground="#333" Margin="0,0,0,20"/>
+                <TextBlock Text="View existing • Upload new • AI Normalize • Commit to DB" FontSize="14" Foreground="#8C8575" Margin="0,0,0,30"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                    <TextBlock x:Name="ListStatus" Foreground="#52B788" FontSize="14" FontWeight="SemiBold"/>
+                    <TextBlock Text=" • " Foreground="#999" Margin="8,0"/>
+                    <TextBlock x:Name="PageInfo" Foreground="#999" FontSize="14"/>
+                </StackPanel>
+
+                <!-- EXISTING TEST CASES FROM DB -->
+                <Border Style="{StaticResource ModernCard}" Margin="0,0,0,20">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Existing Test Cases in Database" FontWeight="SemiBold" FontSize="16" Margin="20,15" Foreground="#D4AF37"/>
+                        <DataGrid x:Name="ExistingTestCasesGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                                  Background="White" RowHeight="48" FontSize="13" MinHeight="250">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="ID" Binding="{Binding testcaseid}" Width="120"/>
+                                <DataGridTextColumn Header="Description" Binding="{Binding testdesc}" Width="2*"/>
+                                <DataGridTextColumn Header="Steps" Binding="{Binding steps_count}" Width="80"/>
+                                <DataGridTextColumn Header="Tags" Binding="{Binding tags_display}" Width="*"/>
+                                <DataGridTemplateColumn Header="Actions" Width="180">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <Button Content="View" Style="{StaticResource GoldActionButton}" Width="70" Margin="0,0,6,0"
+                                                        CommandParameter="{Binding testcaseid}" Click="ViewTestCase_Click"/>
+                                                <Button Content="Edit" Style="{StaticResource GoldActionButton}" Width="70"
+                                                        CommandParameter="{Binding testcaseid}" Click="EditTestCase_Click"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,30">
+                    <Button Content="Previous" Style="{StaticResource GoldActionButton}" Width="100" Click="PrevPage_Click" Margin="0,0,10,0"/>
+                    <Button Content="Next" Style="{StaticResource GoldActionButton}" Width="100" Click="NextPage_Click"/>
+                </StackPanel>
+
+                <!-- UPLOAD AREA -->
+                <Border Style="{StaticResource ModernCard}" AllowDrop="True" DragOver="DropArea_DragOver" Drop="DropArea_Drop" Margin="0,0,0,20">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="20,0">
+                            <TextBlock Text="Drop Excel file here (.xlsx)" FontSize="18" FontWeight="SemiBold" Foreground="#D4AF37"/>
+                            <TextBlock x:Name="SelectedFileLbl" Text="No file selected" Foreground="#666" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" HorizontalAlignment="Right" Margin="20">
+                            <Button x:Name="UploadBtn" Content="Upload &amp; Preview" Style="{StaticResource GoldActionButton}"
+                                    Height="48" Width="200" IsEnabled="False" Click="UploadAndPreview_Click"/>
+                            <TextBlock x:Name="UploadStatus" Foreground="#52B788" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- NEW UPLOADED TEST CASES -->
+                <Border x:Name="UploadedTestCasesPanel" Style="{StaticResource ModernCard}" Visibility="Collapsed" Margin="0,0,0,20">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="New Uploaded Test Cases (Ready for Normalization)" 
+                                   FontWeight="SemiBold" FontSize="16" Margin="20,15" Foreground="#D4AF37"/>
+
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,10">
+                            <Button x:Name="NormalizeSelectedBtn" Content="Normalize All Selected" 
+                                    Style="{StaticResource GoldActionButton}" Width="200" Height="40" 
+                                    IsEnabled="False" Click="NormalizeSelected_Click" Margin="0,0,10,0"/>
+                            <Button Content="Select All" Style="{StaticResource GoldActionButton}" Width="120" Height="40"
+                                    Click="SelectAll_Click"/>
+                        </StackPanel>
+
+                        <DataGrid x:Name="UploadedTestCasesGrid" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False"
+                                  Background="White" RowHeight="48" FontSize="13" MinHeight="250">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Width="60">
+                                    <DataGridTemplateColumn.Header>
+                                        <CheckBox x:Name="SelectAllCheckBox" Checked="SelectAll_Checked" Unchecked="SelectAll_Unchecked"/>
+                                    </DataGridTemplateColumn.Header>
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
+                                                      Style="{StaticResource CenterCheckBoxStyle}"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="ID" Binding="{Binding TestCaseId}" Width="120"/>
+                                <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="2*"/>
+                                <DataGridTextColumn Header="Steps" Binding="{Binding Steps.Count}" Width="80"/>
+                                <DataGridTextColumn Header="Tags" Binding="{Binding TagsString}" Width="*"/>
+                                <DataGridTemplateColumn Header="Actions" Width="280">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <Button Content="View" Style="{StaticResource GoldActionButton}" Width="70" Margin="0,0,6,0"
+                                                        CommandParameter="{Binding TestCaseId}" Click="ViewUploadedTestCase_Click"/>
+                                                <Button Content="Edit" Style="{StaticResource GoldActionButton}" Width="70" Margin="0,0,6,0"
+                                                        CommandParameter="{Binding TestCaseId}" Click="EditUploadedTestCase_Click"/>
+                                                <Button Content="Normalize" Style="{StaticResource GoldActionButton}" Width="90"
+                                                        CommandParameter="{Binding TestCaseId}" Click="NormalizeIndividual_Click"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </Border>
+
+                <!-- COMMIT PANEL -->
+                <StackPanel x:Name="ActionPanel" Orientation="Horizontal" HorizontalAlignment="Right"
+                            Visibility="Collapsed" Margin="0,40,0,20">
+                    <Button Content="Cancel Upload" Style="{StaticResource GoldActionButton}" Width="140" 
+                            Click="CancelUpload_Click" Margin="0,0,12,0"/>
+                    <Button Content="Commit to Database" Style="{StaticResource GoldActionButton}" Width="180"
+                            Click="CommitToDb_Click"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>
