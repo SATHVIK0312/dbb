@@ -682,7 +682,77 @@ async def get_project_testcases(
     finally:
         if conn:
             await conn.close()
-            
+
+# ====================== NEW ENDPOINT: Get Steps for a Test Case ======================
+@app.get("/testcases/{testcase_id}/steps")
+async def get_testcase_steps(
+    testcase_id: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # Step 1: Get the test case and its project(s)
+        tc_row = await (await conn.execute(
+            "SELECT projectid, testdesc FROM testcase WHERE testcaseid = ?",
+            (testcase_id,)
+        )).fetchone()
+
+        if not tc_row:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        # Extract project IDs (stored as JSON array string like '["PJ0001"]' or '["PJ0001","PJ0002"]')
+        project_ids = from_json(tc_row["projectid"])
+        if not project_ids:
+            raise HTTPException(status_code=403, detail="Test case has no associated project")
+
+        # Step 2: Check if user has access to ANY of these projects
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row or not user_row["projectid"]:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_projects = from_json(user_row["projectid"])
+
+        # Check for intersection
+        has_access = any(pid in user_projects for pid in project_ids)
+        if not has_access:
+            raise HTTPException(status_code=403, detail="You do not have access to this test case's project")
+
+        # Step 3: Fetch steps and args
+        steps_row = await (await conn.execute(
+            "SELECT steps, args, stepnum FROM teststep WHERE testcaseid = ?",
+            (testcase_id,)
+        )).fetchone()
+
+        if not steps_row:
+            raise HTTPException(status_code=404, detail="No steps found for this test case")
+
+        steps_list = from_json(steps_row["steps"])
+        args_list = from_json(steps_row["args"])
+
+        return {
+            "testcaseid": testcase_id,
+            "testdesc": tc_row["testdesc"] or "",
+            "steps": steps_list,
+            "args": args_list,
+            "stepnum": steps_row["stepnum"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching test case steps: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8002, log_level="debug")
