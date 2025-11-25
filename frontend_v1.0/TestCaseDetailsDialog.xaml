@@ -1,0 +1,219 @@
+<Window x:Class="JPMCGenAI_v1._0.TestCaseDetailsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Test Case Details"
+        Height="780" Width="1150"
+        Background="#FAF9F6"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        FontFamily="Segoe UI">
+
+    <Window.Resources>
+        <!-- JPMC Flux Gold & Cream Theme -->
+        <SolidColorBrush x:Key="GoldBrush" Color="#D4AF37"/>
+        <SolidColorBrush x:Key="LightGoldBrush" Color="#FFF8F0"/>
+        <SolidColorBrush x:Key="DarkText" Color="#333333"/>
+        <SolidColorBrush x:Key="MediumText" Color="#666666"/>
+        <SolidColorBrush x:Key="LightBorder" Color="#E2E1DC"/>
+
+        <!-- Modern TextBox -->
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderBrush" Value="#E2E1DC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10">
+                            <ScrollViewer x:Name="PART_ContentHost"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- DataGrid Style -->
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E2E1DC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="RowBackground" Value="White"/>
+            <Setter Property="AlternatingRowBackground" Value="#FFFBF5"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#EEE"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="ColumnHeaderHeight" Value="44"/>
+            <Setter Property="RowHeight" Value="48"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="CanUserAddRows" Value="True"/>
+            <Setter Property="CanUserDeleteRows" Value="True"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#FFF8F0"/>
+            <Setter Property="Foreground" Value="#D4AF37"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="BorderBrush" Value="#E2E1DC"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+
+        <!-- Button Style -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#D4AF37"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="20,10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#B8952D"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <!-- Main Card -->
+    <Border Margin="20" Background="White" CornerRadius="20" BorderBrush="#E2E1DC" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" Opacity="0.12" ShadowDepth="8"/>
+        </Border.Effect>
+
+        <Grid Margin="30">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <TextBlock Grid.Row="0" 
+                       Text="Test Case Details" 
+                       FontSize="28" 
+                       FontWeight="Bold" 
+                       Foreground="#333" 
+                       Margin="0,0,0,20"/>
+
+            <!-- Basic Info -->
+            <Grid Grid.Row="1" Margin="0,0,0,30">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,20,0">
+                    <TextBlock Text="Test Case ID" Foreground="#D4AF37" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBox x:Name="TestCaseIdTextBox" IsReadOnly="True"/>
+
+                    <TextBlock Text="Description" Foreground="#D4AF37" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                    <TextBox x:Name="TestDescriptionTextBox" Height="80" TextWrapping="Wrap" AcceptsReturn="True"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Tags" Foreground="#D4AF37" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBox x:Name="TagsTextBox"/>
+
+                    <TextBlock Text="Prerequisites" Foreground="#D4AF37" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                    <TextBox x:Name="PrerequisitesTextBox" Height="80" TextWrapping="Wrap" AcceptsReturn="True"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Test Steps Section -->
+            <Grid Grid.Row="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Test Steps" 
+                               FontSize="18" 
+                               FontWeight="Bold" 
+                               Foreground="#D4AF37"/>
+                    <!-- Optional: Add toggle button later if you want -->
+                </Grid>
+
+                <!-- Table View -->
+                <Border Grid.Row="1" Background="White" CornerRadius="16" BorderBrush="#E2E1DC" BorderThickness="1">
+                    <DataGrid x:Name="TestStepsDataGrid"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="True"
+                              CanUserDeleteRows="True"
+                              CanUserReorderColumns="True"
+                              CanUserResizeColumns="True"
+                              SelectionMode="Single"
+                              SelectionUnit="FullRow">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#" 
+                                                Binding="{Binding StepNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                Width="60"/>
+                            <DataGridTextColumn Header="Step Description" 
+                                                Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                Width="2*"/>
+                            <DataGridTextColumn Header="Action / Parameters" 
+                                                Binding="{Binding Action, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                Width="1.5*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <!-- JSON Editor – Collapsed by default (exactly like your original behavior) -->
+                <TextBox x:Name="TestStepsJsonTextBox"
+                         Grid.Row="1"
+                         Margin="0,12,0,0"
+                         Height="180"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         TextWrapping="NoWrap"
+                         FontFamily="Consolas"
+                         FontSize="12"
+                         Background="#FFF8F0"
+                         Foreground="#333"
+                         BorderBrush="#D4AF37"
+                         BorderThickness="2"
+                         Padding="16"
+                         Visibility="Collapsed">
+                    <TextBox.Template>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="16">
+                                <ScrollViewer x:Name="PART_ContentHost"/>
+                            </Border>
+                        </ControlTemplate>
+                    </TextBox.Template>
+                </TextBox>
+            </Grid>
+
+            <!-- Footer -->
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,30,0,10">
+                <Button Content="Close" 
+                        Click="CancelButton_Click" 
+                        Width="140" 
+                        Height="44"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>
