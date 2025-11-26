@@ -1629,6 +1629,119 @@ async def stage_excel_upload(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Staging failed: {str(e)}")
 
+###############################################
+
+@app.get("/testplan/{testcase_id}")
+async def get_testplan_json(
+    testcase_id: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Returns full test plan JSON for execution:
+    - All prerequisite test cases (steps + args)
+    - Current test case BDD steps
+    - Ready for AI executor
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # 1. Get test case and its project(s)
+        tc_row = await (await conn.execute(
+            "SELECT projectid, pretestid FROM testcase WHERE testcaseid = ?",
+            (testcase_id,)
+        )).fetchone()
+
+        if not tc_row:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        project_ids = from_json(tc_row["projectid"])
+
+        # 2. Check user access
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_projects = from_json(user_row["projectid"])
+        if not any(pid in user_projects for pid in project_ids):
+            raise HTTPException(status_code=403, detail="You do not have access to this test case")
+
+        # 3. Build prerequisite chain (recursive)
+        async def get_prereq_chain(tc_id: str, visited=None):
+            if visited is None:
+                visited = set()
+            if tc_id in visited:
+                return []  # prevent cycles
+            visited.add(tc_id)
+
+            row = await (await conn.execute(
+                "SELECT pretestid FROM testcase WHERE testcaseid = ?",
+                (tc_id,)
+            )).fetchone()
+
+            if not row or not row["pretestid"]:
+                return [tc_id]
+
+            chain = await get_prereq_chain(row["pretestid"], visited)
+            return chain + [tc_id]
+
+        prereq_chain = await get_prereq_chain(testcase_id)
+
+        # 4. Build final JSON
+        result = {
+            "pretestid_steps": {},
+            "pretestid_scripts": {},  # if you have testscript table
+            "current_testid": testcase_id,
+            "current_bdd_steps": {}
+        }
+
+        # Prerequisites (in order)
+        for tc_id in prereq_chain[:-1]:  # exclude current
+            steps_row = await (await conn.execute(
+                "SELECT steps, args FROM teststep WHERE testcaseid = ?",
+                (tc_id,)
+            )).fetchone()
+
+            if steps_row and steps_row["steps"]:
+                steps_list = from_json(steps_row["steps"])
+                args_list = from_json(steps_row["args"])
+                result["pretestid_steps"][tc_id] = dict(zip(steps_list, args_list))
+
+            # Optional: if you have a testscript table
+            # script_row = await (await conn.execute(
+            #     "SELECT script FROM testscript WHERE testcaseid = ?",
+            #     (tc_id,)
+            # )).fetchone()
+            # if script_row and script_row["script"]:
+            #     result["pretestid_scripts"][tc_id] = script_row["script"]
+
+        # Current test case steps
+        current_steps_row = await (await conn.execute(
+            "SELECT steps, args FROM teststep WHERE testcaseid = ?",
+            (testcase_id,)
+        )).fetchone()
+
+        if current_steps_row and current_steps_row["steps"]:
+            steps_list = from_json(current_steps_row["steps"])
+            args_list = from_json(current_steps_row["args"])
+            result["current_bdd_steps"] = dict(zip(steps_list, args_list))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] get_testplan_json failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate test plan: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
 
 if __name__ == "__main__":
     import uvicorn
