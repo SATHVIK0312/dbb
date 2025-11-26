@@ -252,3 +252,13 @@ INSERT INTO testcase (
 
 
 ----------------------------------------------
+CREATE TABLE execution (
+    exeid TEXT PRIMARY KEY,
+    testcaseid TEXT,
+    scripttype TEXT,
+    datestamp TEXT DEFAULT (DATE('now')),
+    exetime TEXT DEFAULT (TIME('now')),
+    message TEXT,
+    output TEXT,
+    status TEXT
+);
