@@ -30,7 +30,7 @@ namespace JPMCGenAI_v1._0
         private List<GroupedTestCase> _groupedTestCases = new();
         private readonly ObservableCollection<UploadedTestCaseViewModel> _uploadedTestCases = new();
 
-        public event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
@@ -98,7 +98,20 @@ namespace JPMCGenAI_v1._0
 
                 foreach (var tc in root.testcases)
                 {
-                    int realStepCount = tc.steps_count ?? 0;
+                    int realStepCount = 0;
+                    try
+                    {
+                        var detailsResp = await _api.GetAsync($"testcases/details?testcaseids={tc.testcaseid}");
+                        if (detailsResp.IsSuccessStatusCode)
+                        {
+                            var detailsJson = await detailsResp.Content.ReadAsStringAsync();
+                            var details = JsonSerializer.Deserialize<TestCaseDetails>(detailsJson,
+                                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            realStepCount = details.Scenarios?.FirstOrDefault()?.Steps?.Count ?? 0;
+                        }
+                    }
+                    catch { }
+
                     display.Add(new
                     {
                         testcaseid = tc.testcaseid,
@@ -181,13 +194,8 @@ namespace JPMCGenAI_v1._0
                 var scenario = details.Scenarios?.FirstOrDefault();
                 if (scenario == null) throw new Exception("No steps found.");
 
-                var stepList = new List<string>();
-                var argList = new List<string>();
-                foreach (var st in scenario.Steps)
-                {
-                    stepList.Add(st.Step ?? "");
-                    argList.Add(st.TestDataText ?? "");
-                }
+                var stepList = scenario.Steps.Select(s => s.Step ?? "").ToList();
+                var argList = scenario.Steps.Select(s => s.TestDataText ?? "").ToList();
 
                 var dlg2 = new EditTestCaseWindow(id, new TestStepInfo
                 {
@@ -400,16 +408,17 @@ namespace JPMCGenAI_v1._0
                         ["original"] = norm.OriginalSteps?.Select(s => new Dictionary<string, object>
                         {
                             ["Index"] = s.Index,
-                            ["Step"] = s.Step,
-                            ["TestDataText"] = s.TestDataText,
-                            ["TestData"] = s.TestData
+                            ["Step"] = s.Step ?? "",
+                            ["TestDataText"] = s.TestDataText ?? "",
+                            ["TestData"] = s.TestData ?? new Dictionary<string, object>()
                         }).ToList() ?? new List<Dictionary<string, object>>(),
+
                         ["normalized"] = norm.NormalizedSteps.Select(s => new Dictionary<string, object>
                         {
                             ["Index"] = s.Index,
-                            ["Step"] = s.Step,
-                            ["TestDataText"] = s.TestDataText,
-                            ["TestData"] = s.TestData
+                            ["Step"] = s.Step ?? "",
+                            ["TestDataText"] = s.TestDataText ?? "",
+                            ["TestData"] = s.TestData ?? new Dictionary<string, object>()
                         }).ToList()
                     });
                 }
@@ -438,7 +447,7 @@ namespace JPMCGenAI_v1._0
         }
         #endregion
 
-        #region Commit to Database (100% WORKING)
+        #region Commit to Database - 100% WORKING
         private async void CommitToDb_Click(object sender, RoutedEventArgs e)
         {
             UploadStatus.Text = "Committing to database...";
@@ -493,19 +502,13 @@ namespace JPMCGenAI_v1._0
                     testcases = testcasesForCommit
                 };
 
-                var content = new StringContent(
-                    JsonSerializer.Serialize(payload),
-                    Encoding.UTF8,
-                    "application/json"
-                );
-
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
                 var response = await _api.PostAsync("commit-staged-upload", content);
                 response.EnsureSuccessStatusCode();
 
                 MessageBox.Show("All test cases committed successfully!", "Success",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
-                // Reset UI
                 _groupedTestCases.Clear();
                 _uploadedTestCases.Clear();
                 UploadedTestCasesPanel.Visibility = Visibility.Collapsed;
@@ -626,8 +629,8 @@ namespace JPMCGenAI_v1._0
                 set { _isSelected = value; OnPropertyChanged(); }
             }
 
-            public event PropertyChangedEventHandler PropertyChanged;
-            protected void OnPropertyChanged([CallerMemberName] string name = null) =>
+            public event PropertyChangedEventHandler? PropertyChanged;
+            protected void OnPropertyChanged([CallerMemberName] ?.string name = null) =>
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
         #endregion
