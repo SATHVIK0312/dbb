@@ -1,10 +1,23 @@
-@app.post("/normalize-uploaded")
+# normalize_endpoint.py
+from fastapi import APIRouter, Body, Depends, HTTPException
+import json
+from azure_openai_client import get_azure_openai_client  # ← NEW: Secure client
+from config import Config
+
+router = APIRouter()
+
+# Reuse your existing auth dependency
+def get_current_any_user():
+    # Replace with your real JWT logic if needed
+    return {"userid": "testuser", "role": "role-1"}
+
+@router.post("/normalize-uploaded")
 async def normalize_uploaded(
     payload: dict = Body(...),
     current_user: dict = Depends(get_current_any_user)
 ):
     """
-    AI-powered test step normalization using Azure OpenAI
+    AI-powered test step normalization using Azure OpenAI (SPN + Cert + Proxy)
     Input: Raw steps from Excel upload
     Output: Clean BDD steps + structured TestData
     """
@@ -56,9 +69,12 @@ Output format (exact JSON array):
 ]
 """
 
-        # CORRECT CALL: Use 'model=' with deployment name
+        # NEW: Get secure client with SPN + cert + proxy
+        client = get_azure_openai_client()
+
+        # Call Azure OpenAI (model = deployment name)
         response = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,
+            model=Config.AZURE_OPENAI_DEPLOYMENT,
             messages=[
                 {"role": "system", "content": "You return only valid JSON arrays. No extra text."},
                 {"role": "user", "content": prompt}
@@ -81,7 +97,7 @@ Output format (exact JSON array):
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
 
-        # Sanitize and finalize output
+        # Final clean output (logic unchanged)
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
@@ -100,7 +116,7 @@ Output format (exact JSON array):
             "original_steps_count": len(original_steps),
             "normalized_steps": normalized_steps,
             "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": AZURE_OPENAI_DEPLOYMENT
+            "model_used": Config.AZURE_OPENAI_DEPLOYMENT
         }
 
     except HTTPException:
@@ -108,7 +124,4 @@ Output format (exact JSON array):
     except Exception as e:
         error_detail = str(e)
         print(f"[NORMALIZE ERROR] {error_detail}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Normalization failed: {error_detail}"
-        )
+        raise HTTPException(status_code=500, detail=f"Normalization failed: {error_detail}")
