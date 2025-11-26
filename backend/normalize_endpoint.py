@@ -1,4 +1,3 @@
-# ====================== AZURE OPENAI NORMALIZATION ENDPOINT ======================
 @app.post("/normalize-uploaded")
 async def normalize_uploaded(
     payload: dict = Body(...),
@@ -6,9 +5,9 @@ async def normalize_uploaded(
 ):
     """
     AI-powered test step normalization using Azure OpenAI
-    Converts raw Excel steps → clean, structured, BDD-style steps
+    Input: Raw steps from Excel upload
+    Output: Clean BDD steps + structured TestData
     """
-    conn = None
     try:
         testcase_id = payload.get("testcaseid")
         original_steps = payload.get("original_steps", [])
@@ -18,7 +17,7 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # Prepare clean input for AI
+        # Clean and prepare input
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
@@ -31,7 +30,6 @@ async def normalize_uploaded(
             })
 
         prompt = f"""You are an expert QA automation engineer.
-
 Normalize the following test steps into clean, atomic, BDD-style format (Given/When/Then).
 
 Rules:
@@ -51,18 +49,18 @@ Output format (exact JSON array):
 [
   {{
     "Index": 1,
-    "Step": "When the user enters valid credentials and clicks login",
+    "Step": "When the user enters valid credentials",
     "TestDataText": "user@example.com, pass123",
     "TestData": {{"username": "user@example.com", "password": "pass123"}}
   }}
 ]
 """
 
-        # AZURE OPENAI CALL (using your existing client)
+        # CORRECT CALL: Use 'model=' with deployment name
         response = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,   # ← Correct for your setup
+            model=AZURE_OPENAI_DEPLOYMENT,
             messages=[
-                {"role": "system", "content": "Return only valid JSON array. No extra text."},
+                {"role": "system", "content": "You return only valid JSON arrays. No extra text."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
@@ -72,21 +70,18 @@ Output format (exact JSON array):
 
         raw_output = response.choices[0].message.content.strip()
 
-        # Extract JSON array safely
+        # Extract JSON array
         start = raw_output.find("[")
         end = raw_output.rfind("]") + 1
         if start == -1 or end == 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"AI did not return valid JSON array. Response: {raw_output[:300]}"
-            )
+            raise HTTPException(status_code=500, detail=f"AI did not return JSON array. Got: {raw_output[:200]}")
 
         try:
             normalized_data = json.loads(raw_output[start:end])
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
 
-        # Sanitize and validate output
+        # Sanitize and finalize output
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
@@ -103,18 +98,16 @@ Output format (exact JSON array):
         return {
             "testcaseid": testcase_id,
             "original_steps_count": len(original_steps),
-            "normalized_steps_count": len(normalized_steps),
             "normalized_steps": normalized_steps,
             "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": AZURE_OPENAI_DEPLOYMENT,
-            "processed_by": current_user["userid"]
+            "model_used": AZURE_OPENAI_DEPLOYMENT
         }
 
     except HTTPException:
         raise
     except Exception as e:
         error_detail = str(e)
-        print(f"[NORMALIZE ERROR] User: {current_user['userid']} | Error: {error_detail}")
+        print(f"[NORMALIZE ERROR] {error_detail}")
         raise HTTPException(
             status_code=500,
             detail=f"Normalization failed: {error_detail}"
