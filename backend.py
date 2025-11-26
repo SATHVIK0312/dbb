@@ -1364,42 +1364,270 @@ async def get_project_summary(
 
 
 
-# ====================== TEST AZURE OPENAI CONNECTION ======================
-@app.get("/test-azure-openai")
-async def test_azure_openai(
-    current_user: dict = Depends(get_current_any_user)
+# ====================== 1. REPLACE NORMALIZED STEPS ======================
+@app.post("/replace-normalized/{testcase_id}")
+async def replace_normalized(
+    testcase_id: str,
+    payload: dict = Body(...),  # {"normalized_steps": [{"Index":1, "Step":"...", "TestDataText":"...", "TestData":{...}}, ...]}
+    current_user: dict == Depends(get_current_any_user)
 ):
+    """
+    Replace existing test steps with AI-normalized version
+    """
+    conn = None
     try:
-        # THIS IS THE FIX: Use "model=" instead of "deployment_id="
-        response = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,        # ← CORRECT: use 'model='
-            messages=[
-                {"role": "user", "content": "Say only: AZURE_OPENAI_IS_WORKING"}
-            ],
-            max_tokens=20,
-            temperature=0
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        normalized_steps = payload.get("normalized_steps", [])
+        if not normalized_steps:
+            raise HTTPException(status_code=400, detail="normalized_steps is required and cannot be empty")
+
+        # Validate test case exists and user has access
+        tc_row = await (await conn.execute(
+            "SELECT projectid FROM testcase WHERE testcaseid = ?",
+            (testcase_id,)
+        )).fetchone()
+
+        if not tc_row:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        project_ids = from_json(tc_row["projectid"])
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row or not any(pid in from_json(user_row["projectid"]) for pid in project_ids):
+            raise HTTPException(status_code=403, detail="You do not have access to this test case")
+
+        # Extract steps and arguments
+        step_texts = [str(s.get("Step", "") or "").strip() for s in normalized_steps]
+        step_args  = [str(s.get("TestDataText", "") or "").strip() for s in normalized_steps]
+
+        if not step_texts:
+            raise HTTPException(status_code=400, detail="No valid steps found in payload")
+
+        # Replace steps in teststep table
+        await conn.execute("DELETE FROM teststep WHERE testcaseid = ?", (testcase_id,))
+        await conn.execute(
+            "INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES (?, ?, ?, ?)",
+            (testcase_id, to_json(step_texts), to_json(step_args), len(step_texts))
         )
 
-        result = response.choices[0].message.content.strip()
+        # Update step count in testcase
+        await conn.execute(
+            "UPDATE testcase SET no_steps = ? WHERE testcaseid = ?",
+            (len(step_texts), testcase_id)
+        )
+
+        await conn.commit()
 
         return {
-            "status": "SUCCESS",
-            "message": "Azure OpenAI is working perfectly!",
-            "ai_response": result,
-            "deployment_used": AZURE_OPENAI_DEPLOYMENT,
-            "endpoint": AZURE_OPENAI_ENDPOINT
+            "testcaseid": testcase_id,
+            "message": "AI-normalized steps successfully applied",
+            "steps_count": len(step_texts),
+            "updated_by": userid
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            await conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Replace failed: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
+
+# ====================== 2. COMMIT STAGED UPLOAD ======================
+@app.post("/commit-staged-upload")
+async def commit_staged_upload(
+    payload: dict = Body(...),  # {"projectid": "PJ0001", "testcases": [{...}, ...]}
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Final commit of staged test cases (from frontend preview) to database
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        project_id = payload.get("projectid")
+        testcases = payload.get("testcases", [])
+
+        if not project_id:
+            raise HTTPException(status_code=400, detail="projectid is required")
+        if not testcases:
+            raise HTTPException(status_code=400, detail="testcases array is required")
+
+        # Validate user has access to project
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row or project_id not in from_json(user_row["projectid"]):
+            raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+        committed = 0
+        for tc in testcases:
+            tc_id = tc.get("testcaseid")
+            if not tc_id:
+                continue
+
+            try:
+                # Insert/Update testcase
+                await conn.execute("""
+                    INSERT INTO testcase 
+                    (testcaseid, testdesc, pretestid, prereq, tag, projectid, no_steps, created_on, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'), ?)
+                    ON CONFLICT(testcaseid) DO UPDATE SET
+                        testdesc=excluded.testdesc,
+                        pretestid=excluded.pretestid,
+                        prereq=excluded.prereq,
+                        tag=excluded.tag,
+                        projectid=excluded.projectid
+                """, (
+                    tc_id,
+                    tc.get("testdesc", ""),
+                    tc.get("pretestid") or None,
+                    tc.get("prereq", "") or None,
+                    to_json(tc.get("tags", [])),
+                    to_json([project_id]),
+                    userid
+                ))
+
+                # Insert steps
+                steps = tc.get("steps", [])
+                step_texts = [s.get("Step", "") or "" for s in steps]
+                step_args  = [s.get("TestDataText", "") or "" for s in steps]
+
+                await conn.execute("DELETE FROM teststep WHERE testcaseid = ?", (tc_id,))
+                await conn.execute(
+                    "INSERT INTO teststep (testcaseid, steps, args, stepnum) VALUES (?, ?, ?, ?)",
+                    (tc_id, to_json(step_texts), to_json(step_args), len(step_texts))
+                )
+
+                # Update step count
+                await conn.execute(
+                    "UPDATE testcase SET no_steps = ? WHERE testcaseid = ?",
+                    (len(step_texts), tc_id)
+                )
+
+                committed += 1
+
+            except Exception as inner_e:
+                print(f"[WARN] Failed to commit {tc_id}: {inner_e}")
+
+        await conn.commit()
+
+        return {
+            "message": f"Successfully committed {committed} test case(s)",
+            "projectid": project_id,
+            "committed_count": committed
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            await conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Commit failed: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
+
+
+# ====================== 3. STAGE EXCEL UPLOAD (PREVIEW) ======================
+@app.post("/stage-excel-upload")
+async def stage_excel_upload(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Parse Excel file and return staged test cases for preview before commit
+    """
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files allowed")
+
+    try:
+        content = await file.read()
+        df = pd.read_excel(io.BytesIO(content))
+
+        required_cols = {"Test Case ID", "Test Case Description", "Pre requisite Test ID",
+                        "Pre requisite Test Description", "Tags", "Test Steps", "Arguments"}
+        if not required_cols.issubset(set(df.columns)):
+            raise HTTPException(status_code=400, detail=f"Missing columns: {required_cols - set(df.columns)}")
+
+        # Get user's allowed projects
+        conn = await get_db_connection()
+        try:
+            user_row = await (await conn.execute(
+                "SELECT projectid FROM projectuser WHERE userid = ?",
+                (current_user["userid"],)
+            )).fetchone()
+            if not user_row or not user_row["projectid"]:
+                raise HTTPException(status_code=403, detail="You are not assigned to any project")
+            allowed_projects = from_json(user_row["projectid"])
+        finally:
+            await conn.close()
+
+        staged_testcases = []
+        current_tc = None
+
+        for _, row in df.iterrows():
+            tc_id_raw = row["Test Case ID"]
+            tc_id = str(tc_id_raw).strip() if pd.notna(tc_id_raw) else ""
+
+            if tc_id and tc_id != "nan":
+                # New test case starts
+                if current_tc:
+                    staged_testcases.append(current_tc)
+
+                tags_raw = str(row["Tags"] or "") if pd.notna(row["Tags"]) else ""
+                tags = [t.strip() for t in tags_raw.split(",") if t.strip() and t.strip() != "nan"]
+
+                current_tc = {
+                    "testcaseid": tc_id,
+                    "testdesc": str(row["Test Case Description"] or ""),
+                    "pretestid": str(row["Pre requisite Test ID"] or "") if pd.notna(row["Pre requisite Test ID"]) else "",
+                    "prereq": str(row["Pre requisite Test Description"] or ""),
+                    "tags": tags,
+                    "projectid": allowed_projects[0],  # default to first project
+                    "steps": []
+                }
+
+                if pd.notna(row["Test Steps"]):
+                    current_tc["steps"].append({
+                        "Index": len(current_tc["steps"]) + 1,
+                        "Step": str(row["Test Steps"]),
+                        "TestDataText": str(row["Arguments"] or "") if pd.notna(row["Arguments"]) else ""
+                    })
+
+            elif current_tc and pd.notna(row["Test Steps"]):
+                # Continuation row
+                current_tc["steps"].append({
+                    "Index": len(current_tc["steps"]) + 1,
+                    "Step": str(row["Test Steps"]),
+                    "TestDataText": str(row["Arguments"] or "") if pd.notna(row["Arguments"]) else ""
+                })
+
+        if current_tc:
+            staged_testcases.append(current_tc)
+
+        return {
+            "message": "Excel uploaded and staged successfully",
+            "staged_count": len(staged_testcases),
+            "allowed_projects": allowed_projects,
+            "default_project": allowed_projects[0],
+            "staged_testcases": staged_testcases
         }
 
     except Exception as e:
-        error = str(e)
-        if "401" in error or "Unauthorized" in error:
-            raise HTTPException(status_code=401, detail="API Key wrong or expired")
-        elif "404" in error:
-            raise HTTPException(status_code=404, detail="Deployment name wrong or not deployed")
-        elif "model_not_found" in error.lower():
-            raise HTTPException(status_code=404, detail=f"Deployment '{AZURE_OPENAI_DEPLOYMENT}' not found. Check name in Azure Portal → Model deployments")
-        else:
-            raise HTTPException(status_code=500, detail=f"Azure OpenAI failed: {error}")
+        raise HTTPException(status_code=500, detail=f"Staging failed: {str(e)}")
 
 
 if __name__ == "__main__":
