@@ -489,3 +489,139 @@ Fix selectors, waits, logic. Keep log format. Output ONLY raw Python code.
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Self-healing execution failed: {e}")
+
+
+
+
+
+
+
+
+
+
+
+async def generate_script_with_madl(
+    testcase_id: str,
+    script_type: str,
+    script_lang: str,
+    testplan: dict,
+    selected_madl_methods: Optional[List[dict]] = None,
+    logger: Optional[StructuredLogger] = None
+):
+    """
+    Generate test script using Azure OpenAI with MADL method integration.
+    Logic unchanged — only Gemini → Azure OpenAI.
+    """
+    try:
+        if logger:
+            logger.info(LogCategory.GENERATION, "Starting script generation with Azure OpenAI")
+
+        # Build MADL methods context
+        madl_context = ""
+        if selected_madl_methods:
+            madl_context = "\n\n# AVAILABLE REUSABLE METHODS (from MADL):\n"
+            for method in selected_madl_methods:
+                madl_context += f"- {method['signature']}: {method['intent']}\n"
+                madl_context += f"  Example: {method['example']}\n"
+
+        prompt = f"""
+        Generate a test script for test case ID: {testcase_id}
+        Script type: {script_type}, Language: {script_lang}
+        Test plan JSON: {json.dumps(testplan)}
+
+        {madl_context}
+
+        Requirements:
+        - If AVAILABLE REUSABLE METHODS are provided, USE them where applicable
+        - Include comments above each action describing the step
+        - Don't use pytest
+        - Wrap each action in try-catch block
+        - Add print statements with timestamps before and after each action
+        - Format: 'Running action: <step> at <timestamp>' and 'Action completed: <step> at <timestamp>'
+        - If action fails, print 'Action <step> failed at <timestamp> due to: <error>'
+        - Handle errors gracefully with context collection (screenshot, DOM snapshot)
+        - Use appropriate imports and syntax
+        - Output ONLY the code, no additional explanations or markdown
+        """
+
+        client = get_azure_openai_client()  # ← Uses your existing config
+        response = client.chat.completions.create(
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=4000,
+            timeout=300
+        )
+
+        raw_text = (response.choices[0].message.content or "").strip()
+        if not raw_text:
+            raise ValueError("Azure OpenAI returned empty script content")
+
+        # ---- CLEAN MARKDOWN CODE FENCES (same logic) ----
+        script_content = raw_text
+        if "```" in raw_text:
+            parts = raw_text.split("```")
+            if len(parts) >= 2:
+                code_block = parts[1]
+                lines = code_block.splitlines()
+                if lines and lines[0].strip().lower().startswith("python"):
+                    lines = lines[1:]
+                script_content = "\n".join(lines).strip()
+        else:
+            script_content = raw_text
+
+        if not script_content:
+            raise ValueError("Script content empty after cleaning code fences")
+
+        if logger:
+            logger.success(
+                LogCategory.GENERATION,
+                f"Script generated ({len(script_content)} bytes, cleaned markdown fences)"
+            )
+
+        return script_content
+
+    except Exception as e:
+        if logger:
+            logger.error(LogCategory.GENERATION, f"Script generation failed: {str(e)}")
+        raise Exception(f"Script generation failed: {str(e)}")
+
+
+async def collect_enhanced_error_context(
+    logs: str,
+    testplan: str,
+    generated_script: str
+) -> Dict[str, Any]:
+    """
+    Collect comprehensive error context for self-healing
+    Includes execution logs, test plan, script, and attempts to extract diagnostics
+    """
+    try:
+        error_context = {
+            "execution_logs": logs,
+            "testplan": testplan,
+            "generated_script": generated_script,
+            "timestamp": datetime.now().isoformat(),
+            "diagnostics": {
+                "error_patterns": [],
+                "failed_actions": []
+            }
+        }
+        
+        # Extract error patterns from logs
+        error_lines = [line for line in logs.split('\n') if 'error' in line.lower() or 'failed' in line.lower()]
+        error_context["diagnostics"]["error_patterns"] = error_lines[:10]  # Top 10 errors
+        
+        # Extract failed actions
+        for line in logs.split('\n'):
+            if 'failed' in line.lower() or 'exception' in line.lower():
+                error_context["diagnostics"]["failed_actions"].append(line.strip())
+        
+        return error_context
+    
+    except Exception as e:
+        utils.logger.error(f"[HEALING] Error context collection failed: {str(e)}")
+        return {"error": str(e), "execution_logs": logs}
+
+
+
