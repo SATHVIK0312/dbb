@@ -1,45 +1,56 @@
 # config.py
 import os
 from pathlib import Path
+from typing import List
+
+# ----------------------------------------------------------------------
+# 1. Load .env **first** – this runs before any class is defined
+# ----------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv
+    load_dotenv()                     # <-- reads .env in the cwd
+except Exception:                     # dotenv is optional in prod
+    pass
+
 
 class Config:
-    # Azure OpenAI
-    AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+    # ------------------------------------------------------------------
+    # 2. Pull values from the environment (ALL CAPS, underscores)
+    # ------------------------------------------------------------------
+    AZURE_OPENAI_ENDPOINT   = os.getenv("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-    
-    # SPN Certificate Auth
-    AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
-    AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
-    CERTIFICATE_PATH = os.getenv("CERTIFICATE_PATH", "certs/spn-cert.pem")
 
-    # Proxy
-    HTTP_PROXY = os.getenv("HTTP_PROXY")
-    HTTPS_PROXY = os.getenv("HTTPS_PROXY")
+    AZURE_TENANT_ID         = os.getenv("AZURE_TENANT_ID")
+    AZURE_CLIENT_ID         = os.getenv("AZURE_CLIENT_ID")
+    CERTIFICATE_PATH        = os.getenv("CERTIFICATE_PATH", "certs/spn-cert.pem")
+
+    HTTP_PROXY              = os.getenv("HTTP_PROXY")
+    HTTPS_PROXY             = os.getenv("HTTPS_PROXY")
+
+    # ------------------------------------------------------------------
+    # 3. Validation – runs **once** when the module is imported
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _missing_vars() -> List[str]:
+        required = ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_OPENAI_ENDPOINT"]
+        return [name for name in required if not getattr(Config, name)]
 
     @staticmethod
     def validate():
-        required_env_vars = [
-            "AZURE_TENANT_ID",
-            "AZURE_CLIENT_ID",
-            "AZURE_OPENAI_ENDPOINT",
-        ]
-        missing = []
-        for var_name in required_env_vars:
-            if not getattr(Config, var_name):
-                missing.append(var_name)
-        
+        missing = Config._missing_vars()
         if missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+            raise RuntimeError(
+                "Config validation failed – missing required env vars: "
+                f"{', '.join(missing)}"
+            )
 
-        # Validate cert file
         cert_path = Path(Config.CERTIFICATE_PATH)
-        if not cert_path.exists():
-            raise FileNotFoundError(f"Certificate not found: {cert_path.resolve()}")
         if not cert_path.is_file():
-            raise ValueError(f"Certificate path is not a file: {cert_path}")
+            raise FileNotFoundError(
+                f"Certificate not found or not a file: {cert_path.resolve()}"
+            )
 
-# Validate on import
-try:
-    Config.validate()
-except Exception as e:
-    raise RuntimeError(f"Config validation failed: {e}") from e
+# ----------------------------------------------------------------------
+# 4. Run validation **immediately** – fails fast if something is wrong
+# ----------------------------------------------------------------------
+Config.validate()
