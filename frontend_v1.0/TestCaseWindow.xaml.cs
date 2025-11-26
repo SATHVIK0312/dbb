@@ -5,9 +5,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
-using jpmc_genai.Services;
+using JPMCGenAI_v1._0.Services;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0
 {
     public partial class TestCaseWindow : Window
     {
