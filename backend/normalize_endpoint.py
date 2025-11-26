@@ -1,12 +1,11 @@
 @app.post("/normalize-uploaded")
 async def normalize_uploaded(
     payload: dict = Body(...),
-    current_user: dict = Depends(get_current_any_user),
-    use_api_key_fallback: bool = False  # optional: ?use_api_key_fallback=true
+    current_user: dict = Depends(get_current_any_user)
 ):
     """
     AI-powered test step normalization using Azure OpenAI
-    → No system role (removed)
+    → No system role
     → Uses secure SPN + cert + proxy client
     → Logic 100% unchanged
     """
@@ -19,7 +18,7 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # Clean input (unchanged)
+        # ---------- INPUT CLEANING (unchanged) ----------
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
@@ -40,7 +39,7 @@ Rules:
 3. Infer structured TestData JSON:
    - email + password → {{"username": "...", "password": "..."}}
    - URL → {{"url": "..."}}
-   - single value → {{"value": "..."}}
+   - single value → {{"value": "..."}}}
    - empty → {{}}
 4. Return ONLY a valid JSON array. No markdown, no code blocks, no explanations.
 
@@ -58,14 +57,14 @@ Output format (exact JSON array):
 ]
 """
 
-        # Get secure client (SPN + cert + proxy)
-        client = get_azure_openai_client(use_fallback=use_api_key_fallback)
+        # ---------- GET SECURE CLIENT (SPN + cert + proxy) ----------
+        client = get_azure_openai_client()  # ← No args
 
-        # Call Azure OpenAI — NO SYSTEM ROLE
+        # ---------- CALL AZURE OPENAI – ONLY USER MESSAGE ----------
         response = client.chat.completions.create(
             model=Config.AZURE_OPENAI_DEPLOYMENT,
             messages=[
-                {"role": "user", "content": prompt}  # ← ONLY USER MESSAGE
+                {"role": "user", "content": prompt}
             ],
             temperature=0.2,
             max_tokens=3000,
@@ -74,7 +73,7 @@ Output format (exact JSON array):
 
         raw_output = response.choices[0].message.content.strip()
 
-        # Extract JSON array
+        # ---------- EXTRACT JSON ARRAY ----------
         start = raw_output.find("[")
         end = raw_output.rfind("]") + 1
         if start == -1 or end == 0:
@@ -85,7 +84,7 @@ Output format (exact JSON array):
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
 
-        # Final output (unchanged)
+        # ---------- FINAL OUTPUT (unchanged) ----------
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
@@ -104,8 +103,7 @@ Output format (exact JSON array):
             "original_steps_count": len(original_steps),
             "normalized_steps": normalized_steps,
             "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": Config.AZURE_OPENAI_DEPLOYMENT,
-            "auth_method": "SPN" if not use_api_key_fallback else "API Key Fallback"
+            "model_used": Config.AZURE_OPENAI_DEPLOYMENT
         }
 
     except HTTPException:
