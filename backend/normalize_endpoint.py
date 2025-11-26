@@ -3,12 +3,6 @@ async def normalize_uploaded(
     payload: dict = Body(...),
     current_user: dict = Depends(get_current_any_user)
 ):
-    """
-    AI-powered test step normalization using Azure OpenAI
-    → No system role
-    → Uses secure SPN + cert + proxy client
-    → Logic 100% unchanged
-    """
     try:
         testcase_id = payload.get("testcaseid")
         original_steps = payload.get("original_steps", [])
@@ -18,17 +12,19 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # ---------- INPUT CLEANING (unchanged) ----------
+        # --- LIMIT INPUT SIZE (Avoid timeout) ---
+        if len(original_steps) > 50:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many steps ({len(original_steps)}). Max 50. Split into batches."
+            )
+
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
             step_text = str(step.get("Step", "") or "").strip()
             data_text = str(step.get("TestDataText", "") or "").strip()
-            steps_input.append({
-                "Index": idx,
-                "Step": step_text,
-                "TestDataText": data_text
-            })
+            steps_input.append({"Index": idx, "Step": step_text, "TestDataText": data_text})
 
         prompt = f"""You are an expert QA automation engineer.
 Normalize the following test steps into clean, atomic, BDD-style format (Given/When/Then).
@@ -57,23 +53,24 @@ Output format (exact JSON array):
 ]
 """
 
-        # ---------- GET SECURE CLIENT (SPN + cert + proxy) ----------
-        client = get_azure_openai_client()  # ← No args
+        client = get_azure_openai_client()
 
-        # ---------- CALL AZURE OPENAI – ONLY USER MESSAGE ----------
-        response = client.chat.completions.create(
-            model=Config.AZURE_OPENAI_DEPLOYMENT,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=3000,
-            top_p=0.9
-        )
+        # --- CALL WITH EXPLICIT TIMEOUT (5 min) ---
+        try:
+            response = client.chat.completions.create(
+                model=Config.AZURE_OPENAI_DEPLOYMENT,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=3000,
+                top_p=0.9,
+                timeout=300  # 5 minutes
+            )
+        except Exception as e:
+            if "timeout" in str(e).lower():
+                raise HTTPException(status_code=504, detail="Azure OpenAI timed out (5 min). Try fewer steps.")
+            raise
 
         raw_output = response.choices[0].message.content.strip()
-
-        # ---------- EXTRACT JSON ARRAY ----------
         start = raw_output.find("[")
         end = raw_output.rfind("]") + 1
         if start == -1 or end == 0:
@@ -84,13 +81,11 @@ Output format (exact JSON array):
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
 
-        # ---------- FINAL OUTPUT (unchanged) ----------
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
             if not isinstance(test_data, dict):
                 test_data = {"value": str(test_data)} if test_data else {}
-
             normalized_steps.append({
                 "Index": item.get("Index", i + 1),
                 "Step": str(item.get("Step", "") or "").strip(),
@@ -109,6 +104,5 @@ Output format (exact JSON array):
     except HTTPException:
         raise
     except Exception as e:
-        error_detail = str(e)
-        print(f"[NORMALIZE ERROR] {error_detail}")
-        raise HTTPException(status_code=500, detail=f"Normalization failed: {error_detail}")
+        print(f"[NORMALIZE ERROR] {e}")
+        raise HTTPException(status_code=500, detail=f"Normalization failed: {e}")
