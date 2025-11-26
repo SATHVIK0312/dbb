@@ -325,3 +325,46 @@ INSERT INTO execution (exeid, testcaseid, scripttype, datestamp, exetime, messag
 
 
 ---------------------------------------------
+
+
+INSERT OR REPLACE INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, projectid, created_on, updated_on, status, no_steps, last_exe_status)
+VALUES
+('TC0002','DASHBOARD','TC0001','LOGIN','["TAG3"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0003','demo 4','TC0001','login','["tag4"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0009','Verify a user with valid credentials can log in successfully.',NULL,'User should exist in the system.','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0010','Verify the system shows an error for invalid login credentials.',NULL,NULL,'["Login","Negative"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC00011','Verify a user can initiate the password reset process.','TC001',NULL,'["Login"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC004200','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC004200','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0002"]',NULL,NULL,NULL,NULL,NULL),
+('TC0020','Verify user can login with valid credentials',NULL,'User must have valid credentials','["Login","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0021','Verify error is shown for invalid login','',NULL,'["Login","Negative"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0022','Verify user can add item to cart','TC0020','User must be logged in','["Cart","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0023','Verify user can remove item from cart','TC0022','User must have item in cart','["Cart"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0024','Verify user can logout successfully','TC0020','User must be logged in','["Login","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0097','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0098','Verify Invalid Login',NULL,NULL,'["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0011','Verify a user with valid credentials can log in successfully.','','User should exist in the system.','["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0097','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0001','login','\n','', '["tag1"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','',NULL,NULL,'[]','["PJ0003"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0013','Verify a user can initiate the password reset process.','TC0011','','["Login"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0012','Verify the system shows an error for invalid login credentials.','', '', '["Login","Negative"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','',NULL,NULL,'[]','["PJ0003"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0071','User Login Test','TC0030','System Ready','["Login","Smoke"]','["PJ0014"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0013"]',NULL,NULL,NULL,NULL,NULL),
+('TC0042','Verify Valid Login',NULL,NULL,'["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL);
+
+
+-------------------------------------------------------------------
