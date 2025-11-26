@@ -1,10 +1,9 @@
-```# normalized.py
+# normalized.py
 import os
 import json
 import logging
 import base64
 import subprocess
-import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,6 @@ from fastapi import FastAPI, Body, Depends, HTTPException, Form, UploadFile, Fil
 from fastapi.responses import PlainTextResponse, Response
 from openai import AzureOpenAI
 from azure.identity import CertificateCredential
-import google.generativeai as genai
 
 # -------------------------------------------------
 # FASTAPI APP
@@ -29,20 +27,13 @@ AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Cert path (same as your original logic)
+# Cert path
 CERT_DIR = Path(__file__).resolve().parent.parent / "JPMC1||certs"
 CERT_PATH = CERT_DIR / "uatagent.azure.jpmchase.new.pem"
 
 # -------------------------------------------------
-# GEMINI SETUP
-# -------------------------------------------------
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.5-pro")
-
-# -------------------------------------------------
-# AZURE OPENAI TOKEN + CLIENT (inline)
+# AZURE OPENAI CLIENT (inline, SPN + cert + fallback)
 # -------------------------------------------------
 def get_azure_openai_client():
     if not CERT_PATH.exists():
@@ -58,7 +49,7 @@ def get_azure_openai_client():
         token = credential.get_token(scope).token
         logging.info(f"SPN Token: {token[:20]}...")
     except Exception as e:
-        logging.warning(f"SPN failed: {e}, falling back to API key")
+        logging.warning(f"SPN failed: {e}, using API key")
         token = AZURE_OPENAI_API_KEY
 
     client = AzureOpenAI(
@@ -67,21 +58,21 @@ def get_azure_openai_client():
         api_key=AZURE_OPENAI_API_KEY,
         default_headers={
             "Authorization": f"Bearer {token}",
-            "user_sid": "NORMALIZE_USER"
+            "user_sid": "AI_USER"
         },
         timeout=300
     )
     return client
 
 # -------------------------------------------------
-# AUTH DEPENDENCY (keep your existing)
+# AUTH DEPENDENCY
 # -------------------------------------------------
 async def get_current_any_user():
-    # Replace with real JWT logic
     return {"userid": "system", "role": "role-1"}
 
+
 # ================================================
-# 1. NORMALIZE-UPLOADED (Azure OpenAI)
+# 1. /normalize-uploaded
 # ================================================
 @app.post("/normalize-uploaded")
 async def normalize_uploaded(
@@ -115,7 +106,7 @@ Rules:
    - URL → {{"url": "..."}}
    - single value → {{"value": "..."}}}
    - empty → {{}}
-4. Return ONLY a valid JSON array. No markdown, no code blocks, no explanations.
+4. Return ONLY a valid JSON array. No markdown, no code blocks.
 
 Input:
 {json.dumps(steps_input, indent=2)}
@@ -132,7 +123,6 @@ Output format:
 """
 
         client = get_azure_openai_client()
-
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT,
             messages=[{"role": "user", "content": prompt}],
@@ -146,7 +136,7 @@ Output format:
         start = raw_output.find("[")
         end = raw_output.rfind("]") + 1
         if start == -1 or end == 0:
-            raise HTTPException(status_code=500, detail=f"AI did not return JSON: {raw_output[:200]}")
+            raise HTTPException(status_code=500, detail=f"Invalid AI output: {raw_output[:200]}")
 
         try:
             normalized_data = json.loads(raw_output[start:end])
@@ -169,9 +159,8 @@ Output format:
             "testcaseid": testcase_id,
             "original_steps_count": len(original_steps),
             "normalized_steps": normalized_steps,
-            "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": AZURE_OPENAI_DEPLOYMENT,
-            "auth_method": "SPN" if token != AZURE_OPENAI_API_KEY else "API Key"
+            "message": "Normalized by Azure OpenAI",
+            "model_used": AZURE_OPENAI_DEPLOYMENT
         }
 
     except HTTPException:
@@ -182,7 +171,7 @@ Output format:
 
 
 # ================================================
-# 2. GEMINI: /self-heal
+# 2. /self-heal (Azure OpenAI)
 # ================================================
 @app.post("/self-heal")
 async def self_heal(
@@ -206,55 +195,50 @@ async def self_heal(
 You are an expert test automation engineer.
 Self-heal the failing script using all the provided data.
 
-============================================================
-TEST PLAN (BDD)
+TEST PLAN (BDD):
 {testplan_output}
-============================================================
 
-============================================================
-ORIGINAL GENERATED SCRIPT
+ORIGINAL SCRIPT:
 {generated_script}
-============================================================
 
-============================================================
-EXECUTION LOGS (THE FAILURE)
+EXECUTION LOGS:
 {execution_logs}
-============================================================
 
-============================================================
-DOM SNAPSHOT
-{dom_html if dom_html else "No DOM snapshot provided"}
-============================================================
+DOM SNAPSHOT:
+{dom_html or "No DOM snapshot"}
 
-============================================================
-SCREENSHOT
-{"Provided" if screenshot_b64 else "No screenshot provided"}
-============================================================
+SCREENSHOT:
+{"Provided" if screenshot_b64 else "No screenshot"}
 
 RULES:
-1. Identify the root cause of failure.
-2. Fix incorrect selectors / waits / navigation / logic.
-3. Maintain SAME LOG FORMAT:
-- "Running action:"
-- "Action runned:"
-- "failed due to:"
-4. Follow all BDD steps from the test plan.
-5. Output ONLY the corrected final Python script.
-6. NO markdown, NO code fences, ONLY raw Python code.
+1. Fix selectors, waits, logic
+2. Keep log format:
+   - "Running action:"
+   - "Action runned:"
+   - "failed due to:"
+3. Output ONLY raw Python code
 """
 
-        parts = [{"text": prompt}]
+        messages = [{"role": "user", "content": prompt}]
         if screenshot_b64:
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/png",
-                    "data": screenshot_b64
-                }
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze this screenshot for UI changes."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"}}
+                ]
             })
 
-        response = gemini_model.generate_content(parts)
-        healed_code = response.text.strip()
+        client = get_azure_openai_client()
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=4000,
+            timeout=300
+        )
 
+        healed_code = response.choices[0].message.content.strip()
         cleaned = healed_code.replace("```python", "").replace("```", "").strip()
 
         return Response(content=cleaned, media_type="text/plain")
@@ -264,7 +248,7 @@ RULES:
 
 
 # ================================================
-# 3. GEMINI: /ai-execution
+# 3. /ai-execution (Generate + Run)
 # ================================================
 @app.post("/ai-execution")
 async def ai_execution(
@@ -275,50 +259,49 @@ async def ai_execution(
 ):
     try:
         if script_type.lower() not in ["playwright", "selenium"]:
-            raise HTTPException(status_code=400, detail="Invalid script_type. Use 'playwright' or 'selenium'.")
+            raise HTTPException(status_code=400, detail="script_type must be 'playwright' or 'selenium'")
         if script_lang.lower() != "python":
-            raise HTTPException(status_code=400, detail="Only Python scripts are supported.")
+            raise HTTPException(status_code=400, detail="Only Python is supported")
 
         prompt = f"""
-        Generate a FULLY EXECUTABLE Python test script for the test case {testcase_id}.
-        Follow this TEST PLAN (JSON):
-        {testplan_output}
+Generate a FULLY EXECUTABLE Python test script for test case {testcase_id}.
+Follow the TEST PLAN (JSON):
+{testplan_output}
 
-        FRAMEWORK: {script_type.lower()} (use sync playwright if playwright, selenium if selenium)
+FRAMEWORK: {script_type.lower()}
 
-        REQUIRED LOGGING FORMAT (for every step):
-        - Before step:  print("Running action: <STEP> at <timestamp>")
-        - After step:   print("Action runned: <STEP> at <timestamp>")
-        - On failure:   print("Action <STEP> failed at <timestamp> due to: <error>")
+LOG FORMAT:
+- print("Running action: <STEP> at <timestamp>")
+- print("Action runned: <STEP> at <timestamp>")
+- print("Action <STEP> failed at <timestamp> due to: <error>")
 
-        FAILURE CAPTURE:
-        - Screenshot: save as 'error_screenshot.png'
-        - DOM dump: save as 'page_dom_dump.txt'
-        - Then re-raise the exception
+CAPTURE ON FAILURE:
+- Screenshot → 'error_screenshot.png'
+- DOM → 'page_dom_dump.txt'
+- Re-raise exception
 
-        PLAYWRIGHT RULES:
-        - from playwright.sync_api import sync_playwright
-        - Use headless=True
-        - page.screenshot(path="error_screenshot.png")
-        - with open("page_dom_dump.txt","w",encoding="utf-8") as f: f.write(page.content())
+RULES:
+- Use sync API
+- Wrap every step in try/except
+- Implement get_timestamp()
+- End with: if __name__ == "__main__": run_test_{testcase_id.lower()}
+- Output ONLY raw Python code
+"""
 
-        SELENIUM RULES:
-        - from selenium import webdriver
-        - driver.save_screenshot("error_screenshot.png")
-        - with open("page_dom_dump.txt","w",encoding="utf-8") as f: f.write(driver.page_source)
+        client = get_azure_openai_client()
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=4000,
+            timeout=300
+        )
 
-        GENERAL RULES:
-        - Implement get_timestamp()
-        - Wrap EVERY step in try/except
-        - End with: if __name__ == "__main__": run_test_{testcase_id.lower()}
-        - Output ONLY raw Python code
-        """
-
-        resp = gemini_model.generate_content([{"text": prompt}])
-        script = (resp.text or "").replace("```python", "").replace("```", "").strip()
+        script = response.choices[0].message.content.strip()
+        script = script.replace("```python", "").replace("```", "").strip()
 
         if not script:
-            raise HTTPException(status_code=500, detail="Gemini returned empty script.")
+            raise HTTPException(status_code=500, detail="Empty script from OpenAI")
 
         temp_path = f"temp_{uuid.uuid4().hex}.py"
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -338,16 +321,15 @@ async def ai_execution(
             bufsize=1
         )
 
-        for line in process.stdout.readline, "":
-            if line:
-                logs.append(f"[{now()}] {line.strip()}")
+        for line in process.stdout:
+            if line := line.strip():
+                logs.append(f"[{now()}] {line}")
 
-        for line in process.stderr.readline, "":
-            if line:
-                logs.append(f"[{now()}] ERROR: {line.strip()}")
+        for line in process.stderr:
+            if line := line.strip():
+                logs.append(f"[{now()}] ERROR: {line}")
 
         process.wait()
-
         if process.returncode != 0:
             status = "FAILED"
 
@@ -355,26 +337,25 @@ async def ai_execution(
         if os.path.exists("error_screenshot.png"):
             ss_path = f"artifacts/screenshot_{uuid.uuid4().hex}.png"
             os.replace("error_screenshot.png", ss_path)
-            ss_log = f"Screenshot saved at {ss_path}"
+            ss_log = f"Screenshot: {ss_path}"
 
         if os.path.exists("page_dom_dump.txt"):
             dom_path = f"artifacts/dom_{uuid.uuid4().hex}.html"
             os.replace("page_dom_dump.txt", dom_path)
-            dom_log = f"DOM snapshot saved at {dom_path}"
+            dom_log = f"DOM: {dom_path}"
 
         if ss_log: logs.append(ss_log)
         if dom_log: logs.append(dom_log)
-
         os.unlink(temp_path)
 
         output = (
             "================ TEST PLAN ================\n"
             f"{testplan_output}\n\n"
-            "================ GENERATED SCRIPT ================\n"
+            "================ SCRIPT ================\n"
             f"{script}\n\n"
-            "================ EXECUTION LOGS ================\n"
+            "================ LOGS ================\n"
             + "\n".join(logs) +
-            f"\n\n================ STATUS ================\n{status}\n"
+            f"\n\n================ STATUS ================\n{status}"
         )
 
         return PlainTextResponse(content=output)
@@ -384,7 +365,7 @@ async def ai_execution(
 
 
 # ================================================
-# 4. GEMINI: /self-healing-execution
+# 4. /self-healing-execution
 # ================================================
 @app.post("/self-healing-execution")
 async def self_healing_execution(
@@ -404,39 +385,50 @@ async def self_healing_execution(
             dom_html = (await dom_snapshot.read()).decode("utf-8")
 
         prompt = f"""
-        You are an expert test automation engineer.
-        Self-heal the failing script using all the provided data.
+Self-heal the failing script.
 
-        TEST PLAN:
-        {testplan_output}
+TEST PLAN:
+{testplan_output}
 
-        ORIGINAL SCRIPT:
-        {generated_script}
+ORIGINAL SCRIPT:
+{generated_script}
 
-        EXECUTION LOGS:
-        {execution_logs}
+LOGS:
+{execution_logs}
 
-        DOM SNAPSHOT:
-        {dom_html or 'No DOM snapshot provided'}
+DOM:
+{dom_html or "None"}
 
-        SCREENSHOT:
-        {'Provided' if screenshot_b64 else 'No screenshot provided'}
+SCREENSHOT:
+{"Provided" if screenshot_b64 else "None"}
 
-        RULES:
-        1. Fix incorrect selectors / waits / logic
-        2. Maintain same log format
-        3. Output only raw Python code (no markdown)
-        """
+Fix selectors, waits, logic. Keep log format. Output ONLY raw Python code.
+"""
 
-        parts = [{"text": prompt}]
+        messages = [{"role": "user", "content": prompt}]
         if screenshot_b64:
-            parts.append({"inline_data": {"mime_type": "image/png", "data": screenshot_b64}})
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Analyze screenshot."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"}}
+                ]
+            })
 
-        response = gemini_model.generate_content(parts)
-        healed_code = (response.text or "").replace("```python", "").replace("```", "").strip()
+        client = get_azure_openai_client()
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=4000,
+            timeout=300
+        )
+
+        healed_code = response.choices[0].message.content.strip()
+        healed_code = healed_code.replace("```python", "").replace("```", "").strip()
 
         if not healed_code:
-            raise HTTPException(status_code=500, detail="Gemini returned empty healed script.")
+            raise HTTPException(status_code=500, detail="Empty healed script")
 
         temp_path = f"temp_healed_{uuid.uuid4().hex}.py"
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -456,16 +448,15 @@ async def self_healing_execution(
             bufsize=1
         )
 
-        for line in process.stdout.readline, "":
-            if line:
-                logs.append(f"[{now()}] {line.strip()}")
+        for line in process.stdout:
+            if line := line.strip():
+                logs.append(f"[{now()}] {line}")
 
-        for line in process.stderr.readline, "":
-            if line:
-                logs.append(f"[{now()}] ERROR: {line.strip()}")
+        for line in process.stderr:
+            if line := line.strip():
+                logs.append(f"[{now()}] ERROR: {line}")
 
         process.wait()
-
         if process.returncode != 0:
             status = "FAILED"
 
@@ -473,16 +464,15 @@ async def self_healing_execution(
         if os.path.exists("error_screenshot.png"):
             ss_path = f"artifacts/screenshot_{uuid.uuid4().hex}.png"
             os.replace("error_screenshot.png", ss_path)
-            ss_log = f"Screenshot saved at {ss_path}"
+            ss_log = f"Screenshot: {ss_path}"
 
         if os.path.exists("page_dom_dump.txt"):
             dom_path = f"artifacts/dom_{uuid.uuid4().hex}.html"
             os.replace("page_dom_dump.txt", dom_path)
-            dom_log = f"DOM snapshot saved at {dom_path}"
+            dom_log = f"DOM: {dom_path}"
 
         if ss_log: logs.append(ss_log)
         if dom_log: logs.append(dom_log)
-
         os.unlink(temp_path)
 
         output = (
@@ -490,12 +480,12 @@ async def self_healing_execution(
             f"{testplan_output}\n\n"
             "================ HEALED SCRIPT ================\n"
             f"{healed_code}\n\n"
-            "================ EXECUTION LOGS ================\n"
+            "================ LOGS ================\n"
             + "\n".join(logs) +
-            f"\n\n================ STATUS ================\n{status}\n"
+            f"\n\n================ STATUS ================\n{status}"
         )
 
         return PlainTextResponse(content=output)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Self-healing execution failed: {e}")```
+        raise HTTPException(status_code=500, detail=f"Self-healing execution failed: {e}")
