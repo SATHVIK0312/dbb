@@ -1,4 +1,4 @@
-using jpmc_genai.Services;
+using JPMCGenAI_v1._0.Services;
 using OfficeOpenXml;
 using System;
 using System.Collections.Generic;
@@ -16,7 +16,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0
 {
     public partial class UploadTestCasePage : Page, INotifyPropertyChanged
     {
