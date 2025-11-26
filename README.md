@@ -368,3 +368,10 @@ VALUES
 
 
 -------------------------------------------------------------------
+
+INSERT OR REPLACE INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, projectid, created_on, updated_on, status, no_steps, last_exe_status)
+VALUES
+('TC0002','DASHBOARD','TC0001','LOGIN','["TAG3"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0003','demo 4','TC0001','login','["tag4"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0009','Verify a user with valid credentials can log in successfully.',NULL,'User should exist in the system.','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
+('TC0010','Verify the system shows an error for invalid login credentials.',NULL,NULL,'["Login","Negative"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL);
