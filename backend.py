@@ -1249,6 +1249,118 @@ async def get_testcase_details(
             await conn.close()
             
 
+# ====================== PROJECT SUMMARY ENDPOINT ======================
+@app.get("/projects/{projectid}/summary")
+async def get_project_summary(
+    projectid: str,
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Returns summary statistics for a project:
+    - Number of users with access
+    - Number of test cases
+    - Execution stats (total, success, failed)
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
+
+        # 1. Verify user has access to this project
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
+
+        if not user_row or not user_row["projectid"]:
+            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+
+        user_projects = from_json(user_row["projectid"])
+        if projectid not in user_projects:
+            raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+        # 2. Count users who have this project in their projectid array
+        # Since projectid is stored as JSON string, we use LIKE '%"PJ0001"%'
+        users_count_row = await (await conn.execute("""
+            SELECT COUNT(*) as count FROM projectuser 
+            WHERE projectid LIKE ?
+        """, (f'%{projectid}%',))).fetchone()
+        users_count = users_count_row["count"] if users_count_row else 0
+
+        # 3. Count test cases in this project
+        tc_count_row = await (await conn.execute("""
+            SELECT COUNT(*) as count FROM testcase 
+            WHERE projectid LIKE ?
+        """, (f'%{projectid}%',))).fetchone()
+        testcases_count = tc_count_row["count"] if tc_count_row else 0
+
+        # 4. Execution statistics (if you have an 'execution' table)
+        # Adjust table/column names if different
+        total_executions = 0
+        successful_executions = 0
+        failed_executions = 0
+
+        try:
+            # Total executions for test cases in this project
+            exec_total = await (await conn.execute("""
+                SELECT COUNT(*) as count FROM execution e
+                WHERE EXISTS (
+                    SELECT 1 FROM testcase tc 
+                    WHERE tc.testcaseid = e.testcaseid 
+                      AND tc.projectid LIKE ?
+                )
+            """, (f'%{projectid}%',))).fetchone()
+            total_executions = exec_total["count"] if exec_total else 0
+
+            # Successful
+            exec_success = await (await conn.execute("""
+                SELECT COUNT(*) as count FROM execution e
+                WHERE EXISTS (
+                    SELECT 1 FROM testcase tc 
+                    WHERE tc.testcaseid = e.testcaseid 
+                      AND tc.projectid LIKE ?
+                )
+                AND LOWER(e.status) IN ('success', 'passed', 'ok')
+            """, (f'%{projectid}%',))).fetchone()
+            successful_executions = exec_success["count"] if exec_success else 0
+
+            # Failed
+            exec_failed = await (await conn.execute("""
+                SELECT COUNT(*) as count FROM execution e
+                WHERE EXISTS (
+                    SELECT 1 FROM testcase tc 
+                    WHERE tc.testcaseid = e.testcaseid 
+                      AND tc.projectid LIKE ?
+                )
+                AND LOWER(e.status) IN ('failed', 'error', 'fail')
+            """, (f'%{projectid}%',))).fetchone()
+            failed_executions = exec_failed["count"] if exec_failed else 0
+
+        except Exception as exec_e:
+            # If execution table doesn't exist yet, just return 0s
+            print(f"[INFO] Execution table not ready yet: {exec_e}")
+            total_executions = successful_executions = failed_executions = 0
+
+        return {
+            "projectid": projectid,
+            "users_count": users_count,
+            "testcases_count": testcases_count,
+            "execution_stats": {
+                "total": total_executions,
+                "successful": successful_executions,
+                "failed": failed_executions,
+                "success_rate": round((successful_executions / total_executions * 100), 2) if total_executions > 0 else 0
+            },
+            "message": "Project summary retrieved successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching project summary: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
 
 
 
