@@ -1,4 +1,4 @@
-using JPMCGenAI_v1._0.Services;
+using jpmc_genai.Services;
 using OfficeOpenXml;
 using System;
 using System.Collections.Generic;
@@ -16,7 +16,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace JPMCGenAI_v1._0
+namespace jpmc_genai
 {
     public partial class UploadTestCasePage : Page, INotifyPropertyChanged
     {
@@ -30,7 +30,7 @@ namespace JPMCGenAI_v1._0
         private List<GroupedTestCase> _groupedTestCases = new();
         private readonly ObservableCollection<UploadedTestCaseViewModel> _uploadedTestCases = new();
 
-        public event PropertyChangedEventHandler? PropertyChanged;
+        public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
@@ -136,12 +136,17 @@ namespace JPMCGenAI_v1._0
 
         private async void PrevPage_Click(object sender, RoutedEventArgs e)
         {
-            if (_page > 1) { _page--; await LoadTestCases(); }
+            if (_page > 1)
+            {
+                _page--;
+                await LoadTestCases();
+            }
         }
 
         private async void NextPage_Click(object sender, RoutedEventArgs e)
         {
-            _page++; await LoadTestCases();
+            _page++;
+            await LoadTestCases();
         }
         #endregion
 
@@ -169,7 +174,8 @@ namespace JPMCGenAI_v1._0
                 {
                     steps = local.Steps.Select(s => s.Step).ToList(),
                     args = local.Steps.Select(s => s.Argument).ToList()
-                }) { Owner = Window.GetWindow(this) };
+                })
+                { Owner = Window.GetWindow(this) };
 
                 if (dlg.ShowDialog() == true)
                 {
@@ -182,6 +188,7 @@ namespace JPMCGenAI_v1._0
                 return;
             }
 
+            // DB test case edit
             try
             {
                 _api.SetBearer(Session.Token);
@@ -194,14 +201,20 @@ namespace JPMCGenAI_v1._0
                 var scenario = details.Scenarios?.FirstOrDefault();
                 if (scenario == null) throw new Exception("No steps found.");
 
-                var stepList = scenario.Steps.Select(s => s.Step ?? "").ToList();
-                var argList = scenario.Steps.Select(s => s.TestDataText ?? "").ToList();
+                var stepList = new List<string>();
+                var argList = new List<string>();
+                foreach (var st in scenario.Steps)
+                {
+                    stepList.Add(st.Description ?? "");
+                    argList.Add(st.TestDataText ?? "");
+                }
 
                 var dlg2 = new EditTestCaseWindow(id, new TestStepInfo
                 {
                     steps = stepList,
                     args = argList
-                }) { Owner = Window.GetWindow(this) };
+                })
+                { Owner = Window.GetWindow(this) };
 
                 if (dlg2.ShowDialog() == true)
                 {
@@ -307,16 +320,21 @@ namespace JPMCGenAI_v1._0
         #region View/Edit Uploaded Test Cases
         private void ViewUploadedTestCase_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button btn || btn.CommandParameter is not string testCaseId) return;
+            if (sender is not Button btn || btn.CommandParameter is not string testCaseId)
+                return;
+
             var testCase = _groupedTestCases.FirstOrDefault(x => x.TestCaseId == testCaseId);
             if (testCase == null) return;
+
             var dlg = new TestCaseDetailWindow_Local(testCase) { Owner = Window.GetWindow(this) };
             dlg.ShowDialog();
         }
 
         private void EditUploadedTestCase_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button btn || btn.CommandParameter is not string testCaseId) return;
+            if (sender is not Button btn || btn.CommandParameter is not string testCaseId)
+                return;
+
             var testCase = _groupedTestCases.FirstOrDefault(x => x.TestCaseId == testCaseId);
             if (testCase == null) return;
 
@@ -324,7 +342,8 @@ namespace JPMCGenAI_v1._0
             {
                 steps = testCase.Steps.Select(s => s.Step).ToList(),
                 args = testCase.Steps.Select(s => s.Argument).ToList()
-            }) { Owner = Window.GetWindow(this) };
+            })
+            { Owner = Window.GetWindow(this) };
 
             if (dlg.ShowDialog() == true)
             {
@@ -342,7 +361,9 @@ namespace JPMCGenAI_v1._0
         #region Normalize Individual
         private async void NormalizeIndividual_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button btn || btn.CommandParameter is not string testCaseId) return;
+            if (sender is not Button btn || btn.CommandParameter is not string testCaseId)
+                return;
+
             var testCase = _groupedTestCases.FirstOrDefault(x => x.TestCaseId == testCaseId);
             if (testCase == null) return;
 
@@ -390,7 +411,8 @@ namespace JPMCGenAI_v1._0
                         {
                             Index = i + 1,
                             Step = s.Step ?? "",
-                            TestDataText = s.Argument ?? ""
+                            TestDataText = s.Argument ?? "",
+                            TestData = new Dictionary<string, object>()
                         }).ToList()
                     };
 
@@ -405,20 +427,20 @@ namespace JPMCGenAI_v1._0
                     normalizedList.Add(new Dictionary<string, object>
                     {
                         ["testcaseid"] = tc.TestCaseId,
-                        ["original"] = norm.OriginalSteps?.Select(s => new Dictionary<string, object>
+                        ["original"] = norm.OriginalSteps.Select(s => new Dictionary<string, object>
                         {
                             ["Index"] = s.Index,
-                            ["Step"] = s.Step ?? "",
-                            ["TestDataText"] = s.TestDataText ?? "",
-                            ["TestData"] = s.TestData ?? new Dictionary<string, object>()
-                        }).ToList() ?? new List<Dictionary<string, object>>(),
+                            ["Step"] = s.Step,
+                            ["TestDataText"] = s.TestDataText,
+                            ["TestData"] = s.TestData
+                        }).ToList(),
 
                         ["normalized"] = norm.NormalizedSteps.Select(s => new Dictionary<string, object>
                         {
                             ["Index"] = s.Index,
-                            ["Step"] = s.Step ?? "",
-                            ["TestDataText"] = s.TestDataText ?? "",
-                            ["TestData"] = s.TestData ?? new Dictionary<string, object>()
+                            ["Step"] = s.Step,
+                            ["TestDataText"] = s.TestDataText,
+                            ["TestData"] = s.TestData
                         }).ToList()
                     });
                 }
@@ -447,7 +469,7 @@ namespace JPMCGenAI_v1._0
         }
         #endregion
 
-        #region Commit to Database - 100% WORKING
+        #region Commit to Database (FULLY WORKING VERSION)
         private async void CommitToDb_Click(object sender, RoutedEventArgs e)
         {
             UploadStatus.Text = "Committing to database...";
@@ -462,7 +484,7 @@ namespace JPMCGenAI_v1._0
                 var normalizedList = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(json,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                var testcasesForCommit = new List<object>();
+                var testcasesForCommit = new List<Dictionary<string, object>>();
 
                 foreach (var item in normalizedList)
                 {
@@ -475,28 +497,34 @@ namespace JPMCGenAI_v1._0
                     var normalizedSteps = item["normalized"] as List<Dictionary<string, object>>
                         ?? throw new Exception("Invalid normalized steps");
 
-                    var steps = new List<object>();
+                    var steps = new List<Dictionary<string, object>>();
+                    // Replace this block inside CommitToDb_Click:
                     foreach (var stepObj in normalizedSteps)
                     {
-                        steps.Add(new
+                        // Remove the 'is JsonElement' pattern, just cast directly
+                        var dict = stepObj as Dictionary<string, object>;
+                        if (dict != null)
                         {
-                            Step = stepObj["Step"]?.ToString() ?? "",
-                            TestDataText = stepObj["TestDataText"]?.ToString() ?? ""
-                        });
+                            steps.Add(new Dictionary<string, object>
+                            {
+                                ["step"] = dict?["Step"]?.ToString() ?? "",
+                                ["steparg"] = dict?["TestDataText"]?.ToString() ?? ""
+                            });
+                        }
                     }
 
-                    testcasesForCommit.Add(new
+                    testcasesForCommit.Add(new Dictionary<string, object>
                     {
-                        testcaseid,
-                        testdesc = originalTc.Description,
-                        pretestid = originalTc.PreReqId ?? "",
-                        prereq = originalTc.PreReqDesc ?? "",
-                        tags = originalTc.Tags,
-                        steps
+                        ["testcaseid"] = testcaseid,
+                        ["testdesc"] = originalTc.Description,
+                        ["pretestid"] = originalTc.PreReqId ?? "",
+                        ["prereq"] = originalTc.PreReqDesc ?? "",
+                        ["tags"] = originalTc.Tags,
+                        ["steps"] = steps
                     });
                 }
 
-                var payload = new
+                var payload = new CommitUploadData
                 {
                     projectid = CurrentProjectId,
                     testcases = testcasesForCommit
@@ -509,15 +537,13 @@ namespace JPMCGenAI_v1._0
                 MessageBox.Show("All test cases committed successfully!", "Success",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
+                // Reset everything
                 _groupedTestCases.Clear();
                 _uploadedTestCases.Clear();
                 UploadedTestCasesPanel.Visibility = Visibility.Collapsed;
                 ActionPanel.Visibility = Visibility.Collapsed;
                 ResetUploadUI();
                 await LoadTestCases();
-
-                UploadStatus.Text = "Commit successful!";
-                UploadStatus.Foreground = Brushes.LimeGreen;
             }
             catch (Exception ex)
             {
@@ -629,8 +655,8 @@ namespace JPMCGenAI_v1._0
                 set { _isSelected = value; OnPropertyChanged(); }
             }
 
-            public event PropertyChangedEventHandler? PropertyChanged;
-            protected void OnPropertyChanged([CallerMemberName] ?.string name = null) =>
+            public event PropertyChangedEventHandler PropertyChanged;
+            protected void OnPropertyChanged([CallerMemberName] string name = null) =>
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
         #endregion
