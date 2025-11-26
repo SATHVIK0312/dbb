@@ -1,25 +1,14 @@
-# normalize_endpoint.py
-from fastapi import APIRouter, Body, Depends, HTTPException
-import json
-from azure_openai_client import get_azure_openai_client  # ← NEW: Secure client
-from config import Config
-
-router = APIRouter()
-
-# Reuse your existing auth dependency
-def get_current_any_user():
-    # Replace with your real JWT logic if needed
-    return {"userid": "testuser", "role": "role-1"}
-
-@router.post("/normalize-uploaded")
+@app.post("/normalize-uploaded")
 async def normalize_uploaded(
     payload: dict = Body(...),
-    current_user: dict = Depends(get_current_any_user)
+    current_user: dict = Depends(get_current_any_user),
+    use_api_key_fallback: bool = False  # optional: ?use_api_key_fallback=true
 ):
     """
-    AI-powered test step normalization using Azure OpenAI (SPN + Cert + Proxy)
-    Input: Raw steps from Excel upload
-    Output: Clean BDD steps + structured TestData
+    AI-powered test step normalization using Azure OpenAI
+    → No system role (removed)
+    → Uses secure SPN + cert + proxy client
+    → Logic 100% unchanged
     """
     try:
         testcase_id = payload.get("testcaseid")
@@ -30,7 +19,7 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # Clean and prepare input
+        # Clean input (unchanged)
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
@@ -69,15 +58,14 @@ Output format (exact JSON array):
 ]
 """
 
-        # NEW: Get secure client with SPN + cert + proxy
-        client = get_azure_openai_client()
+        # Get secure client (SPN + cert + proxy)
+        client = get_azure_openai_client(use_fallback=use_api_key_fallback)
 
-        # Call Azure OpenAI (model = deployment name)
+        # Call Azure OpenAI — NO SYSTEM ROLE
         response = client.chat.completions.create(
             model=Config.AZURE_OPENAI_DEPLOYMENT,
             messages=[
-                {"role": "system", "content": "You return only valid JSON arrays. No extra text."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt}  # ← ONLY USER MESSAGE
             ],
             temperature=0.2,
             max_tokens=3000,
@@ -97,7 +85,7 @@ Output format (exact JSON array):
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
 
-        # Final clean output (logic unchanged)
+        # Final output (unchanged)
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
@@ -116,7 +104,8 @@ Output format (exact JSON array):
             "original_steps_count": len(original_steps),
             "normalized_steps": normalized_steps,
             "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": Config.AZURE_OPENAI_DEPLOYMENT
+            "model_used": Config.AZURE_OPENAI_DEPLOYMENT,
+            "auth_method": "SPN" if not use_api_key_fallback else "API Key Fallback"
         }
 
     except HTTPException:
