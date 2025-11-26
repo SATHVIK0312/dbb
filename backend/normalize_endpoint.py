@@ -1,3 +1,44 @@
+import os
+import json
+import logging
+from fastapi import Body, Depends, HTTPException
+from openai import AzureOpenAI
+from azure.identity import CertificateCredential
+
+# === CONFIG (from .env) ===
+AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
+AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+
+# === HARD-CODED CERT PATH (as in your function) ===
+CERT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+    "JPMC1||certs", "uatagent.azure.jpmchase.new.pem"
+)
+
+# === INLINE: get_access_token() ===
+def get_access_token():
+    if not os.path.exists(CERT_PATH):
+        raise RuntimeError(f"Cert not found: {CERT_PATH}")
+    
+    scope = "https://cognitiveservices.azure.com/.default"
+    try:
+        credential = CertificateCredential(
+            tenant_id=AZURE_TENANT_ID,
+            client_id=AZURE_CLIENT_ID,
+            certificate_path=CERT_PATH
+        )
+        token = credential.get_token(scope).token
+        logging.info(f"SPN Token acquired: {token[:20]}...")
+        return token
+    except Exception as e:
+        logging.error(f"SPN token failed: {e}")
+        raise
+
+# === ENDPOINT ===
 @app.post("/normalize-uploaded")
 async def normalize_uploaded(
     payload: dict = Body(...),
@@ -12,13 +53,7 @@ async def normalize_uploaded(
         if not original_steps:
             raise HTTPException(status_code=400, detail="original_steps cannot be empty")
 
-        # --- LIMIT INPUT SIZE (Avoid timeout) ---
-        if len(original_steps) > 50:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Too many steps ({len(original_steps)}). Max 50. Split into batches."
-            )
-
+        # Input cleaning
         steps_input = []
         for i, step in enumerate(original_steps):
             idx = step.get("Index", i + 1)
@@ -42,7 +77,7 @@ Rules:
 Input:
 {json.dumps(steps_input, indent=2)}
 
-Output format (exact JSON array):
+Output format:
 [
   {{
     "Index": 1,
@@ -53,34 +88,48 @@ Output format (exact JSON array):
 ]
 """
 
-        client = get_azure_openai_client()
-
-        # --- CALL WITH EXPLICIT TIMEOUT (5 min) ---
+        # === GET TOKEN + CLIENT ===
         try:
-            response = client.chat.completions.create(
-                model=Config.AZURE_OPENAI_DEPLOYMENT,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=3000,
-                top_p=0.9,
-                timeout=300  # 5 minutes
-            )
-        except Exception as e:
-            if "timeout" in str(e).lower():
-                raise HTTPException(status_code=504, detail="Azure OpenAI timed out (5 min). Try fewer steps.")
-            raise
+            access_token = get_access_token()
+        except:
+            logging.warning("SPN failed, falling back to API key")
+            access_token = AZURE_OPENAI_API_KEY  # fallback
+
+        client = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_version=AZURE_OPENAI_API_VERSION,
+            api_key=AZURE_OPENAI_API_KEY,  # always required
+            default_headers={
+                "Authorization": f"Bearer {access_token}",
+                "user_sid": "NORMALIZE_USER"
+            },
+            timeout=300  # 5 min
+        )
+
+        # === CALL AZURE OPENAI ===
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_DEPLOYMENT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=3000,
+            top_p=0.9,
+            timeout=300
+        )
 
         raw_output = response.choices[0].message.content.strip()
+
+        # Extract JSON
         start = raw_output.find("[")
         end = raw_output.rfind("]") + 1
         if start == -1 or end == 0:
-            raise HTTPException(status_code=500, detail=f"AI did not return JSON array. Got: {raw_output[:200]}")
+            raise HTTPException(status_code=500, detail=f"AI did not return JSON: {raw_output[:200]}")
 
         try:
             normalized_data = json.loads(raw_output[start:end])
         except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail=f"Invalid JSON from AI: {e}")
+            raise HTTPException(status_code=500, detail=f"Invalid JSON: {e}")
 
+        # Final output
         normalized_steps = []
         for i, item in enumerate(normalized_data):
             test_data = item.get("TestData", {})
@@ -98,11 +147,12 @@ Output format (exact JSON array):
             "original_steps_count": len(original_steps),
             "normalized_steps": normalized_steps,
             "message": "Test steps successfully normalized by Azure OpenAI",
-            "model_used": Config.AZURE_OPENAI_DEPLOYMENT
+            "model_used": AZURE_OPENAI_DEPLOYMENT,
+            "auth_method": "SPN" if access_token != AZURE_OPENAI_API_KEY else "API Key"
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[NORMALIZE ERROR] {e}")
+        logging.error(f"[NORMALIZE ERROR] {e}")
         raise HTTPException(status_code=500, detail=f"Normalization failed: {e}")
