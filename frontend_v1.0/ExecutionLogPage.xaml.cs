@@ -15,9 +15,8 @@ using JPMCGenAI_v1._0.Services;
 namespace JPMCGenAI_v1._0
 {
     // =====================================================================
-    // MODELS USED IN THIS PAGE
+    // MODELS
     // =====================================================================
-
 
     public class ReusableMethodsResponse
     {
@@ -34,7 +33,7 @@ namespace JPMCGenAI_v1._0
     }
 
     // =====================================================================
-    // MAIN PAGE
+    // MAIN PAGE - ExecutionLogPage
     // =====================================================================
     public partial class ExecutionLogPage : Page
     {
@@ -43,15 +42,16 @@ namespace JPMCGenAI_v1._0
         private ExecutionLog _selectedExecution;
         private TestPlan _currentTestPlan;
 
-        // REQUIRED FIELD
-        private List<ReusableMethodDto> _detectedMethods = new();
-
         public ExecutionLogPage()
         {
             InitializeComponent();
             _apiClient = new ApiClient();
             _executionLogs = new ObservableCollection<ExecutionLog>();
             ExecutionLogDataGrid.ItemsSource = _executionLogs;
+
+            // Initial UI state
+            GenerateScriptButton.IsEnabled = false;
+            SelectedExecutionInfo.Text = "Double-click a row to select an execution and generate script";
         }
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
@@ -83,261 +83,268 @@ namespace JPMCGenAI_v1._0
                 {
                     var content = await response.Content.ReadAsStringAsync();
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-
                     var logs = JsonSerializer.Deserialize<List<ExecutionLog>>(content, options);
 
                     _executionLogs.Clear();
                     foreach (var log in logs.OrderByDescending(l => l.datestamp).ThenByDescending(l => l.exetime))
+                    {
                         _executionLogs.Add(log);
+                    }
 
                     StatusTextBlock.Text = $"Loaded {logs.Count} execution records";
                 }
                 else
                 {
-                    StatusTextBlock.Text = $"Error loading logs: {response.StatusCode}";
+                    StatusTextBlock.Text = "Failed to load execution logs";
                 }
             }
             catch (Exception ex)
             {
-                StatusTextBlock.Text = $"Error: {ex.Message}";
-            }
-        }
-
-        private void ExecutionLogDataGrid_DoubleClick(object sender, MouseButtonEventArgs e)
-        {
-            if (ExecutionLogDataGrid.SelectedItem is ExecutionLog log)
-            {
-                _selectedExecution = log;
-                GenerateScriptButton.IsEnabled = true;
-                SelectedExecutionInfo.Text =
-                    $"Selected: {log.testcaseid} (Execution {log.exeid})";
+                StatusTextBlock.Text = "Error loading logs";
+                MessageBox.Show($"Error: {ex.Message}");
             }
         }
 
         // =====================================================================
-        //  GENERATE SCRIPT
+        // DOUBLE-CLICK ROW → SELECT EXECUTION
+        // =====================================================================
+        private void ExecutionLogDataGrid_DoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var row = ItemsControl.ContainerFromElement(
+                sender as DataGrid, e.OriginalSource as DependencyObject) as DataGridRow;
+
+            if (row == null || row.Item is not ExecutionLog log) return;
+
+            _selectedExecution = log;
+            GenerateScriptButton.IsEnabled = true;
+
+            SelectedExecutionInfo.Text = 
+                $"Selected → Test Case: {log.testcaseid} | Execution ID: {log.exeid} | Status: {log.status}";
+        }
+
+        // =====================================================================
+        // GENERATE SCRIPT BUTTON CLICK
         // =====================================================================
         private async void GenerateScript_Click(object sender, RoutedEventArgs e)
         {
             if (_selectedExecution == null)
             {
-                MessageBox.Show("Please select an execution record first");
+                MessageBox.Show("Please double-click a row to select an execution first.");
                 return;
             }
 
+            string testCaseId = _selectedExecution.testcaseid;
+
             try
             {
-                StatusTextBlock.Text = "Fetching test plan...";
+                StatusTextBlock.Text = $"Fetching test plan for {testCaseId}...";
                 _apiClient.SetBearer(Session.Token);
 
-                var testPlanResponse = await _apiClient.GetAsync(
-                    "TestPlan",
-                    new Dictionary<string, string> { { "testCaseId", _selectedExecution.testcaseid } });
+                // CORRECT API CALL → /testplan/{testcase_id}
+                var response = await _apiClient.GetAsync($"testplan/{testCaseId}");
 
-                if (!testPlanResponse.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
+                    var error = await response.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Failed to fetch test plan:\n{response.StatusCode}\n{error}");
                     StatusTextBlock.Text = "Error fetching test plan";
                     return;
                 }
 
-                var testPlanContent = await testPlanResponse.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync();
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                _currentTestPlan = JsonSerializer.Deserialize<TestPlan>(testPlanContent, options);
 
-                bool includePrereq = ((ComboBoxItem)PrereqSelector.SelectedItem).Content
-                    .ToString().Contains("Include");
+                _currentTestPlan = JsonSerializer.Deserialize<TestPlan>(json, options);
 
-                string scriptType =
-                    ((ComboBoxItem)ScriptTypeSelector.SelectedItem).Content.ToString().ToLower();
+                if (_currentTestPlan == null)
+                {
+                    MessageBox.Show("Received empty or invalid test plan data.");
+                    StatusTextBlock.Text = "Invalid test plan data";
+                    return;
+                }
 
-                string scriptLang =
-                    ((ComboBoxItem)ScriptLangSelector.SelectedItem).Content.ToString().ToLower();
+                // Get user preferences
+                bool includePrereq = PrereqSelector.SelectedIndex == 0; // First item = Include
+                string scriptType = (ScriptTypeSelector.SelectedItem as ComboBoxItem)?.Content?.ToString().ToLower() ?? "playwright";
+                string scriptLang = (ScriptLangSelector.SelectedItem as ComboBoxItem)?.Content?.ToString().ToLower() ?? "python";
 
                 StatusTextBlock.Text = "Generating script...";
 
                 var payload = new
                 {
-                    pretestid_steps = _currentTestPlan?.pretestid_steps ??
-                                      new Dictionary<string, Dictionary<string, string>>(),
-
-                    pretestid_scripts = _currentTestPlan?.pretestid_scripts ??
-                                        new Dictionary<string, string>(),
-
-                    current_testid = _selectedExecution.testcaseid,
-
-                    current_bdd_steps = _currentTestPlan?.current_bdd_steps ??
-                                        new Dictionary<string, string>()
+                    pretestid_steps = _currentTestPlan.pretestid_steps ?? new Dictionary<string, Dictionary<string, string>>(),
+                    pretestid_scripts = _currentTestPlan.pretestid_scripts ?? new Dictionary<string, string>(),
+                    current_testid = testCaseId,
+                    current_bdd_steps = _currentTestPlan.current_bdd_steps ?? new Dictionary<string, string>()
                 };
 
-                var jsonContent = new StringContent(
+                var content = new StringContent(
                     JsonSerializer.Serialize(payload),
                     System.Text.Encoding.UTF8,
                     "application/json");
 
                 var scriptResponse = await _apiClient.PostAsync(
-                    $"generate-test-script/{_selectedExecution.testcaseid}" +
+                    $"generate-test-script/{testCaseId}" +
                     $"?script_type={scriptType}&script_lang={scriptLang}&include_prereq={includePrereq}",
-                    jsonContent);
+                    content);
 
                 if (!scriptResponse.IsSuccessStatusCode)
                 {
-                    MessageBox.Show(await scriptResponse.Content.ReadAsStringAsync());
+                    var err = await scriptResponse.Content.ReadAsStringAsync();
+                    MessageBox.Show($"Script generation failed:\n{err}");
                     StatusTextBlock.Text = "Script generation failed";
                     return;
                 }
 
-                var raw = await scriptResponse.Content.ReadAsStringAsync();
+                var resultJson = await scriptResponse.Content.ReadAsStringAsync();
+                var scriptResult = JsonSerializer.Deserialize<SimpleScriptResponse>(resultJson, options);
 
-                var result = JsonSerializer.Deserialize<SimpleScriptResponse>(raw, options);
-
-                if (result == null)
+                if (string.IsNullOrWhiteSpace(scriptResult?.Generated_Script))
                 {
-                    MessageBox.Show("Failed to parse script:\n" + raw);
+                    MessageBox.Show("Generated script is empty.");
                     return;
                 }
 
-                ShowSimpleScriptDialog(result.Testcase_Id, result.Generated_Script, _selectedExecution.output);
+                // Show generated script + execution log
+                ShowSimpleScriptDialog(
+                    testCaseId: testCaseId,
+                    script: scriptResult.Generated_Script,
+                    executionLog: _selectedExecution.output ?? "No execution output recorded."
+                );
 
-                StatusTextBlock.Text = "Script generated";
+                StatusTextBlock.Text = "Script generated successfully!";
             }
             catch (Exception ex)
             {
-                StatusTextBlock.Text = $"Error: {ex.Message}";
-                MessageBox.Show(ex.Message);
+                StatusTextBlock.Text = "Error occurred";
+                MessageBox.Show($"Error:\n{ex.Message}");
             }
         }
 
-
         // =====================================================================
-        // SIMPLE SCRIPT POPUP (WITH NEW BUTTON)
+        // SHOW SCRIPT + EXECUTION LOG + REUSABLE METHODS BUTTON
         // =====================================================================
         private void ShowSimpleScriptDialog(string testCaseId, string script, string executionLog)
         {
             var win = new Window
             {
                 Title = $"Generated Script - {testCaseId}",
-                Width = 900,
-                Height = 700,
-                Background = Brushes.Black,
+                Width = 1000,
+                Height = 750,
+                Background = new SolidColorBrush(Color.FromRgb(30, 30, 30)),
                 Foreground = Brushes.White,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = Window.GetWindow(this)
+                Owner = Window.GetWindow(this),
+                ResizeMode = ResizeMode.CanResizeWithGrip
             };
 
-            var root = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var stack = new StackPanel { Margin = new Thickness(20) };
-            root.Content = stack;
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var stack = new StackPanel { Margin = new Thickness(25) };
 
             stack.Children.Add(new TextBlock
             {
-                Text = "Generated Script",
-                FontSize = 16,
-                FontWeight = FontWeights.Bold
+                Text = "Generated Automation Script",
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 0, 10)
             });
 
             stack.Children.Add(new TextBox
             {
                 Text = script,
-                AcceptsReturn = true,
                 IsReadOnly = true,
-                Background = Brushes.Black,
-                Foreground = Brushes.Cyan,
+                AcceptsReturn = true,
                 FontFamily = new FontFamily("Consolas"),
-                Height = 350
+                Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
+                Foreground = Brushes.Cyan,
+                Padding = new Thickness(10),
+                Margin = new Thickness(0, 0, 0, 20),
+                Height = 360
             });
 
             stack.Children.Add(new TextBlock
             {
-                Text = "Execution Log",
+                Text = "Execution Log Output",
                 FontSize = 16,
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 20, 0, 0)
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 10, 0, 8)
             });
 
             stack.Children.Add(new TextBox
             {
                 Text = executionLog,
-                AcceptsReturn = true,
                 IsReadOnly = true,
-                Background = Brushes.Black,
-                Foreground = Brushes.LightGreen,
+                AcceptsReturn = true,
                 FontFamily = new FontFamily("Consolas"),
-                Height = 200
+                Background = new SolidColorBrush(Color.FromRgb(40, 40, 40)),
+                Foreground = Brushes.LightGreen,
+                Padding = new Thickness(10),
+                Height = 180
             });
 
-            var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 20, 0, 0) };
+            var btnPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 25, 0, 10)
+            };
 
             var checkBtn = new Button
             {
                 Content = "Check Reusable Methods",
                 Background = Brushes.Orange,
-                Padding = new Thickness(10, 6, 10, 6),
-                Margin = new Thickness(0, 0, 10, 0)
+                Foreground = Brushes.White,
+                Padding = new Thickness(16, 10),
+                Margin = new Thickness(0, 0, 12, 0)
             };
-            checkBtn.Click += async (s, e) =>
-            {
-                await CheckReusableMethods(testCaseId, script);
-            };
+            checkBtn.Click += async (_, __) => await CheckReusableMethods(testCaseId, script);
 
             var downloadBtn = new Button
             {
                 Content = "Download Script",
-                Background = Brushes.Cyan,
-                Padding = new Thickness(10, 6, 10, 6),
-                Margin = new Thickness(0, 0, 10, 0)
+                Background = Brushes.DeepSkyBlue,
+                Foreground = Brushes.White,
+                Padding = new Thickness(16, 10),
+                Margin = new Thickness(0, 0, 12, 0)
             };
-            downloadBtn.Click += (s, e) => DownloadScript(testCaseId, script);
+            downloadBtn.Click += (_, __) => DownloadScript(testCaseId, script);
 
             var closeBtn = new Button
             {
                 Content = "Close",
                 Background = Brushes.Gray,
-                Padding = new Thickness(10, 6, 10, 6)
+                Foreground = Brushes.White,
+                Padding = new Thickness(16, 10)
             };
-            closeBtn.Click += (s, e) => win.Close();
+            closeBtn.Click += (_, __) => win.Close();
 
-            btnRow.Children.Add(checkBtn);
-            btnRow.Children.Add(downloadBtn);
-            btnRow.Children.Add(closeBtn);
+            btnPanel.Children.Add(checkBtn);
+            btnPanel.Children.Add(downloadBtn);
+            btnPanel.Children.Add(closeBtn);
 
-            stack.Children.Add(btnRow);
-
-            win.Content = root;
+            stack.Children.Add(btnPanel);
+            scroll.Content = stack;
+            win.Content = scroll;
             win.ShowDialog();
         }
 
-
-        // =====================================================================
-        // CALL BACKEND TO DETECT REUSABLE METHODS
-        // =====================================================================
         private async Task CheckReusableMethods(string testCaseId, string script)
         {
+            // Same as before — kept for compatibility
             try
             {
                 _apiClient.SetBearer(Session.Token);
 
-                // Extract BDD steps from the loaded TestPlan
-                List<string> bddSteps = new();
-
-                if (_currentTestPlan?.current_bdd_steps != null)
-                {
-                    foreach (var step in _currentTestPlan.current_bdd_steps.Keys)
-                        bddSteps.Add(step);
-                    // SEND THE STEP TEXT, NOT THE ARGUMENT
-
-                }
+                List<string> bddSteps = _currentTestPlan?.current_bdd_steps?.Keys.ToList() ?? new List<string>();
 
                 var payload = new
                 {
                     testcase_id = testCaseId,
-                    generated_script = script,   // IGNORE SCRIPT
+                    generated_script = script,
                     bdd_steps = bddSteps
                 };
 
-
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
+                var content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
                 var response = await _apiClient.PostAsync("reusable-methods/check", content);
 
                 if (!response.IsSuccessStatusCode)
@@ -347,174 +354,64 @@ namespace JPMCGenAI_v1._0
                 }
 
                 var raw = await response.Content.ReadAsStringAsync();
-                MessageBox.Show(raw, "RAW JSON FROM BACKEND");
-
-                var data = JsonSerializer.Deserialize<ReusableMethodsResponse>(
-                    raw,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
+                var data = JsonSerializer.Deserialize<ReusableMethodsResponse>(raw,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (data?.Results == null || data.Results.Count == 0)
                 {
-                    MessageBox.Show("No reusable methods detected.");
+                    MessageBox.Show("No reusable methods detected for this script.");
                     return;
                 }
 
-                // 👉 Correct method call:
-                var viewWindow = new ReusableMethodViewWindow(data.Results);
-                viewWindow.ShowDialog();
-
+                var view = new ReusableMethodViewWindow(data.Results);
+                view.ShowDialog();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Error checking reusable methods:\n" + ex.Message);
+                MessageBox.Show("Error: " + ex.Message);
             }
         }
 
-
-
-        // =====================================================================
-        // POPUP WINDOW: DISPLAY REUSABLE METHODS
-        // =====================================================================
-        private void ShowReusableMethodsWindow(List<ReusableMethodDto> results)
-        {
-            var win = new Window
-            {
-                Title = "Reusable Method Suggestions",
-                Width = 1100,
-                Height = 700,
-                Background = Brushes.Black,
-                Foreground = Brushes.White,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = Window.GetWindow(this)
-            };
-
-            var root = new ScrollViewer();
-            var stack = new StackPanel { Margin = new Thickness(20) };
-            root.Content = stack;
-
-            stack.Children.Add(new TextBlock
-            {
-                Text = "Detected Reusable Methods",
-                FontSize = 22,
-                FontWeight = FontWeights.Bold
-            });
-
-            var list = new ListView
-            {
-                Height = 500,
-                Background = Brushes.Black,
-                Foreground = Brushes.White,
-                BorderBrush = Brushes.Gray,
-                BorderThickness = new Thickness(1)
-            };
-
-            var gv = new GridView();
-            list.View = gv;
-
-            gv.Columns.Add(new GridViewColumn { Header = "Query", Width = 180, DisplayMemberBinding = new System.Windows.Data.Binding("Query") });
-            gv.Columns.Add(new GridViewColumn { Header = "Method", Width = 160, DisplayMemberBinding = new System.Windows.Data.Binding("Method_Name") });
-            gv.Columns.Add(new GridViewColumn { Header = "Class", Width = 160, DisplayMemberBinding = new System.Windows.Data.Binding("Class_Name") });
-            gv.Columns.Add(new GridViewColumn { Header = "Match %", Width = 80, DisplayMemberBinding = new System.Windows.Data.Binding("Match_Percentage") });
-            gv.Columns.Add(new GridViewColumn { Header = "Signature", Width = 250, DisplayMemberBinding = new System.Windows.Data.Binding("Full_Signature") });
-
-            list.ItemsSource = results;
-            stack.Children.Add(list);
-
-            var codeBox = new TextBox
-            {
-                AcceptsReturn = true,
-                TextWrapping = TextWrapping.NoWrap,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Background = Brushes.Black,
-                Foreground = Brushes.Lime,
-                FontFamily = new FontFamily("Consolas"),
-                Height = 220,
-                Visibility = Visibility.Collapsed
-            };
-
-            stack.Children.Add(codeBox);
-
-            list.MouseDoubleClick += (s, e) =>
-            {
-                if (list.SelectedItem is ReusableMethodDto r)
-                {
-                    codeBox.Text = r.method_code;
-                    codeBox.Visibility = Visibility.Visible;
-                }
-            };
-
-            var closeBtn = new Button
-            {
-                Content = "Close",
-                Background = Brushes.Gray,
-                Foreground = Brushes.White,
-                Padding = new Thickness(10, 6, 10, 6),
-                Margin = new Thickness(0, 10, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Right
-            };
-            closeBtn.Click += (s, e) => win.Close();
-
-            stack.Children.Add(closeBtn);
-
-            win.Content = root;
-            win.ShowDialog();
-        }
-
-
-        // =====================================================================
-        // DOWNLOAD SCRIPT
-        // =====================================================================
         private void DownloadScript(string testCaseId, string script)
         {
             try
             {
-                var path = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    $"{testCaseId}_script_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
-
+                string fileName = $"{testCaseId}_script_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName);
                 File.WriteAllText(path, script);
-                MessageBox.Show("Saved:\n" + path);
+                MessageBox.Show($"Script saved to Desktop:\n{path}", "Saved", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Error saving file:\n" + ex.Message);
+                MessageBox.Show("Save failed: " + ex.Message);
             }
         }
 
-
         // =====================================================================
-        // NAVIGATION
+        // NAVIGATION (unchanged)
         // =====================================================================
         private void BackToDashboard_Click(object sender, RoutedEventArgs e)
-        {
-            if (Session.CurrentProject != null)
-                NavigationService.Navigate(new DashboardPage(Session.CurrentProject.projectid));
-            else
-                NavigationService.Navigate(new ProjectPage());
-        }
+            => NavigationService?.Navigate(Session.CurrentProject != null
+                ? new DashboardPage(Session.CurrentProject.projectid)
+                : new ProjectPage());
 
         private void AITestExecutor_Click(object sender, RoutedEventArgs e)
-        {
-            if (Session.CurrentProject != null)
-                NavigationService.Navigate(new AITestExecutorPage(Session.CurrentProject.projectid));
-            else
-                MessageBox.Show("Select a project first");
-        }
+            => NavigationService?.Navigate(Session.CurrentProject != null
+                ? new AITestExecutorPage(Session.CurrentProject.projectid)
+                : new ProjectPage());
 
         private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
-            => NavigationService.Navigate(new ScriptGeneratorPage());
+            => NavigationService?.Navigate(new ScriptGeneratorPage());
 
         private void UploadTestCase_Click(object sender, RoutedEventArgs e)
-            => NavigationService.Navigate(new UploadTestCasePage());
+            => NavigationService?.Navigate(new UploadTestCasePage());
 
         private void ChangeProject_Click(object sender, RoutedEventArgs e)
-            => NavigationService.Navigate(new ProjectPage());
+            => NavigationService?.Navigate(new ProjectPage());
     }
 
     // =====================================================================
-    // REUSABLE METHOD DTO — MUST BE OUTSIDE MAIN CLASS
+    // REUSABLE METHOD DTO (must be public or internal)
     // =====================================================================
     public class ReusableMethodDto
     {
@@ -526,6 +423,10 @@ namespace JPMCGenAI_v1._0
         public double score { get; set; }
         public string signature { get; set; }
         public string method_code { get; set; }
+        public string Query => query;
+        public string Method_Name => method_name;
+        public string Class_Name => class_name;
+        public string Match_Percentage => $"{score:P1}";
+        public string Full_Signature => signature;
     }
-
 }
