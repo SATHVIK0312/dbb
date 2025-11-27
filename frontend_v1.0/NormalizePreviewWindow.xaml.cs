@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace jpmc_genai
+namespace JPMCGenAI_v1._0JPMCGenAI_v1._0
 {
     public partial class NormalizePreviewWindow : Window
     {
