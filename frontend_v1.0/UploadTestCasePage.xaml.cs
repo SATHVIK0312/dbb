@@ -179,8 +179,11 @@ namespace jpmc_genai
 
                 if (dlg.ShowDialog() == true)
                 {
-                    local.Steps = dlg.EditableSteps.Select(es => new TestStep
+                    // Preserve original StepNo where possible
+                    var originalSteps = local.Steps;
+                    local.Steps = dlg.EditableSteps.Select((es, idx) => new TestStep
                     {
+                        StepNo = originalSteps.ElementAtOrDefault(idx)?.StepNo ?? (idx + 1),
                         Step = es.Step,
                         Argument = es.TestDataText
                     }).ToList();
@@ -347,11 +350,14 @@ namespace jpmc_genai
 
             if (dlg.ShowDialog() == true)
             {
-                testCase.Steps = dlg.EditableSteps.Select(es => new TestStep
+                var originalSteps = testCase.Steps;
+                testCase.Steps = dlg.EditableSteps.Select((es, idx) => new TestStep
                 {
+                    StepNo = originalSteps.ElementAtOrDefault(idx)?.StepNo ?? (idx + 1),
                     Step = es.Step,
                     Argument = es.TestDataText
                 }).ToList();
+
                 _uploadedTestCases.First(x => x.TestCaseId == testCaseId).Description = testCase.Description;
                 UploadedTestCasesGrid.Items.Refresh();
             }
@@ -409,7 +415,8 @@ namespace jpmc_genai
                         testcaseid = tc.TestCaseId,
                         original_steps = tc.Steps.Select((s, i) => new
                         {
-                            Index = i + 1,
+                            // Use StepNo from Excel if present, otherwise fallback to 1-based index
+                            Index = s.StepNo != 0 ? s.StepNo : (i + 1),
                             Step = s.Step ?? "",
                             TestDataText = s.Argument ?? "",
                             TestData = new Dictionary<string, object>()
@@ -498,17 +505,17 @@ namespace jpmc_genai
                         ?? throw new Exception("Invalid normalized steps");
 
                     var steps = new List<Dictionary<string, object>>();
-                    // Replace this block inside CommitToDb_Click:
                     foreach (var stepObj in normalizedSteps)
                     {
-                        // Remove the 'is JsonElement' pattern, just cast directly
                         var dict = stepObj as Dictionary<string, object>;
                         if (dict != null)
                         {
+                            // include stepno mapped from Index if present
                             steps.Add(new Dictionary<string, object>
                             {
                                 ["step"] = dict?["Step"]?.ToString() ?? "",
-                                ["steparg"] = dict?["TestDataText"]?.ToString() ?? ""
+                                ["steparg"] = dict?["TestDataText"]?.ToString() ?? "",
+                                ["stepno"] = dict?["Index"]?.ToString() ?? ""
                             });
                         }
                     }
@@ -583,6 +590,11 @@ namespace jpmc_genai
             using var package = new ExcelPackage(new FileInfo(path));
             var ws = package.Workbook.Worksheets[0];
 
+            // Validate header: StepNo must be at column 6 (Option A)
+            var headerStepNo = ws.Cells[1, 6].GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(headerStepNo) || !headerStepNo.Equals("StepNo", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("Excel must contain 'StepNo' column at column 6 (before Step).");
+
             for (int row = 2; row <= ws.Dimension.End.Row; row++)
             {
                 var rawId = ws.Cells[row, 1].GetValue<string>()?.Trim();
@@ -591,8 +603,13 @@ namespace jpmc_genai
                 if (string.IsNullOrWhiteSpace(rawId) && current == null) continue;
 
                 var desc = ws.Cells[row, 2].GetValue<string>()?.Trim() ?? "";
-                var stepText = ws.Cells[row, 6].GetValue<string>()?.Trim();
-                var argText = ws.Cells[row, 7].GetValue<string>()?.Trim();
+                // Column mapping per Option A:
+                // col 6 -> StepNo
+                // col 7 -> Step
+                // col 8 -> Argument
+                var stepNoCell = ws.Cells[row, 6].GetValue<string>()?.Trim();
+                var stepText = ws.Cells[row, 7].GetValue<string>()?.Trim();
+                var argText = ws.Cells[row, 8].GetValue<string>()?.Trim();
 
                 if (current == null || current.TestCaseId != id)
                 {
@@ -610,10 +627,18 @@ namespace jpmc_genai
                     };
                 }
 
+                // If row contains either a step or an argument, StepNo must be present and numeric
                 if (!string.IsNullOrWhiteSpace(stepText) || !string.IsNullOrWhiteSpace(argText))
                 {
+                    if (string.IsNullOrWhiteSpace(stepNoCell))
+                        throw new Exception($"Missing StepNo at row {row}. Please provide StepNo in column 6.");
+
+                    if (!int.TryParse(stepNoCell, out int stepNo))
+                        throw new Exception($"Invalid StepNo '{stepNoCell}' at row {row}. StepNo must be a number.");
+
                     current.Steps.Add(new TestStep
                     {
+                        StepNo = stepNo,
                         Step = stepText ?? "",
                         Argument = argText ?? ""
                     });
@@ -636,6 +661,8 @@ namespace jpmc_genai
 
         public class TestStep
         {
+            // StepNo must come from Excel (column 6)
+            public int StepNo { get; set; }
             public string Step { get; set; } = "";
             public string Argument { get; set; } = "";
         }
