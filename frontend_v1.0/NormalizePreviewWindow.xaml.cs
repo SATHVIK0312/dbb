@@ -7,251 +7,193 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 
-namespace JPMCGenAI_v1._0
+namespace jpmc_genai
 {
     public partial class NormalizePreviewWindow : Window
     {
         private List<Dictionary<string, object>> _data;
-
         public List<Dictionary<string, object>> UpdatedNormalizedList { get; private set; }
 
         public NormalizePreviewWindow(List<Dictionary<string, object>> normalizedData)
         {
             InitializeComponent();
-            _data = normalizedData;
+            _data = normalizedData ?? new List<Dictionary<string, object>>();
 
-            if (_data != null && _data.Count > 0)
+            if (_data.Count > 0)
             {
-                System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Received {_data.Count} test cases");
-                foreach (var item in _data)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] TestCase ID: {item["testcaseid"]}");
-                    if (item.ContainsKey("original"))
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] - Original steps count: {(item["original"] as IEnumerable)?.Cast<object>().Count() ?? 0}");
-                    if (item.ContainsKey("normalized"))
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] - Normalized steps count: {(item["normalized"] as IEnumerable)?.Cast<object>().Count() ?? 0}");
-                }
-
-                TestCaseSelector.ItemsSource = _data.Select(x => x["testcaseid"]?.ToString()).ToList();
-                TestCaseSelector.SelectedIndex = 0;
+                var ids = _data.Select(x => x["testcaseid"]?.ToString()).Where(id => id != null).ToList();
+                TestCaseSelector.ItemsSource = ids;
+                if (ids.Count > 0)
+                    TestCaseSelector.SelectedIndex = 0;
             }
             else
             {
-                MessageBox.Show("No data to display", "Empty Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("No test cases to display.", "Empty Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Close();
             }
         }
 
-        private void TestCaseSelector_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        private void TestCaseSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (TestCaseSelector.SelectedItem == null) return;
+            if (TestCaseSelector.SelectedItem is not string selectedId) return;
 
-            try
+            var tc = _data.FirstOrDefault(x => x["testcaseid"]?.ToString() == selectedId);
+            if (tc == null) return;
+
+            var originalSteps = new ObservableCollection<StepModel>();
+            var normalizedSteps = new ObservableCollection<StepModel>();
+
+            // Load Original Steps
+            if (tc.TryGetValue("original", out var originalObj) && originalObj != null)
             {
-                string selectedId = TestCaseSelector.SelectedItem.ToString();
-                System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Selected: {selectedId}");
+                var steps = ConvertToStepList(originalObj);
+                LoadStepsIntoGrid(steps, originalSteps);
+            }
 
-                var tc = _data.FirstOrDefault(x => x["testcaseid"]?.ToString() == selectedId);
+            // Load Normalized Steps
+            if (tc.TryGetValue("normalized", out var normalizedObj) && normalizedObj != null)
+            {
+                var steps = ConvertToStepList(normalizedObj);
+                LoadStepsIntoGrid(steps, normalizedSteps);
+            }
 
-                if (tc == null)
-                {
-                    MessageBox.Show($"Test case '{selectedId}' not found in data.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
+            OriginalGrid.ItemsSource = originalSteps;
+            NormalizedGrid.ItemsSource = normalizedSteps;
+        }
 
+        private IEnumerable<Dictionary<string, object>> ConvertToStepList(object data)
+        {
+            if (data is JsonElement je)
+            {
                 try
                 {
-                    var originalSteps = new ObservableCollection<StepModel>();
-                    if (tc.ContainsKey("original"))
-                    {
-                        var originalData = tc["original"];
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Original data type: {originalData?.GetType().Name}");
-
-                        IEnumerable<Dictionary<string, object>> originalList = null;
-
-                        if (originalData is JsonElement je)
-                        {
-                            originalList = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(je.GetRawText());
-                        }
-                        else if (originalData is List<Dictionary<string, object>> list)
-                        {
-                            originalList = list;
-                        }
-                        else if (originalData is IEnumerable enumerable)
-                        {
-                            originalList = enumerable.Cast<object>().Select(s => ExtractStepData(s)).Where(s => s != null).ToList();
-                        }
-
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Original steps parsed: {originalList?.Count() ?? 0}");
-
-                        if (originalList != null)
-                        {
-                            foreach (var step in originalList)
-                            {
-                                if (step != null)
-                                {
-                                    var model = new StepModel
-                                    {
-                                        Index = step.ContainsKey("Index") ? step["Index"]?.ToString() ?? "0" : "0",
-                                        Step = step.ContainsKey("Step") ? step["Step"]?.ToString() ?? "" : "",
-                                        TestDataText = step.ContainsKey("TestDataText") ? step["TestDataText"]?.ToString() ?? "" : "",
-                                        TestData = step.ContainsKey("TestData")
-        ? (step["TestData"] as Dictionary<string, object> ?? new Dictionary<string, object>())
-        : new Dictionary<string, object>()
-                                    };
-                                    originalSteps.Add(model);
-                                }
-                            }
-                        }
-                    }
-                    System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Final original steps count: {originalSteps.Count}");
-                    OriginalGrid.ItemsSource = originalSteps;
+                    return JsonSerializer.Deserialize<List<Dictionary<string, object>>>(je.GetRawText()) ?? new();
                 }
-                catch (Exception ex)
+                catch
                 {
-                    System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Error binding original steps: {ex}");
-                    MessageBox.Show($"Error binding original steps: {ex.Message}", "Binding Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-
-                try
-                {
-                    var normalizedSteps = new ObservableCollection<StepModel>();
-                    if (tc.ContainsKey("normalized"))
-                    {
-                        var normalizedData = tc["normalized"];
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Normalized data type: {normalizedData?.GetType().Name}");
-
-                        IEnumerable<Dictionary<string, object>> normalizedList = null;
-
-                        if (normalizedData is JsonElement je)
-                        {
-                            normalizedList = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(je.GetRawText());
-                        }
-                        else if (normalizedData is List<Dictionary<string, object>> list)
-                        {
-                            normalizedList = list;
-                        }
-                        else if (normalizedData is IEnumerable enumerable)
-                        {
-                            normalizedList = enumerable.Cast<object>().Select(s => ExtractStepData(s)).Where(s => s != null).ToList();
-                        }
-
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Normalized steps parsed: {normalizedList?.Count() ?? 0}");
-
-                        if (normalizedList != null)
-                        {
-                            foreach (var step in normalizedList)
-                            {
-                                if (step != null)
-                                {
-                                    var model = new StepModel
-                                    {
-                                        Index = step.ContainsKey("Index") ? step["Index"]?.ToString() ?? "0" : "0",
-                                        Step = step.ContainsKey("Step") ? step["Step"]?.ToString() ?? "" : "",
-                                        TestDataText = step.ContainsKey("TestDataText") ? step["TestDataText"]?.ToString() ?? "" : "",
-                                        TestData = step.ContainsKey("TestData")
-         ? (step["TestData"] as Dictionary<string, object> ?? new Dictionary<string, object>())
-         : new Dictionary<string, object>()
-                                    };
-                                    normalizedSteps.Add(model);
-                                }
-                            }
-                        }
-                        System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Final normalized steps count: {normalizedSteps.Count}");
-                        NormalizedGrid.ItemsSource = normalizedSteps;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Error binding normalized steps: {ex}");
-                    MessageBox.Show($"Error binding normalized steps: {ex.Message}", "Binding Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return new List<Dictionary<string, object>>();
                 }
             }
-            catch (Exception ex)
+
+            if (data is List<Dictionary<string, object>> list)
+                return list;
+
+            if (data is IEnumerable enumerable)
             {
-                System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Error in selection changed: {ex}");
-                MessageBox.Show($"Error in TestCaseSelector_SelectionChanged: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                var result = new List<Dictionary<string, object>>();
+                foreach (var item in enumerable)
+                {
+                    var dict = ExtractStepData(item);
+                    if (dict != null)
+                        result.Add(dict);
+                }
+                return result;
             }
+
+            return new List<Dictionary<string, object>>();
         }
 
         private Dictionary<string, object> ExtractStepData(object step)
         {
             try
             {
-                if (step is Dictionary<string, object> dict)
-                {
-                    return dict;
-                }
-                else if (step is JsonElement je)
-                {
+                if (step is Dictionary<string, object> dict) return dict;
+                if (step is JsonElement je)
                     return JsonSerializer.Deserialize<Dictionary<string, object>>(je.GetRawText());
-                }
-                else if (step is IDictionary idict)
+                if (step is IDictionary idict)
                 {
                     var result = new Dictionary<string, object>();
                     foreach (var key in idict.Keys)
                     {
-                        result[key.ToString()] = idict[key];
+                        if (key != null)
+                            result[key.ToString()] = idict[key];
                     }
                     return result;
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[NormalizePreviewWindow] Error extracting step data: {ex}");
-                return null;
+                System.Diagnostics.Debug.WriteLine($"[ExtractStepData] Error: {ex.Message}");
             }
             return null;
+        }
+
+        private void LoadStepsIntoGrid(IEnumerable<Dictionary<string, object>> steps, ObservableCollection<StepModel> collection)
+        {
+            collection.Clear();
+            if (steps == null) return;
+
+            int index = 1;
+            foreach (var step in steps)
+            {
+                if (step == null) continue;
+
+                var model = new StepModel
+                {
+                    Index = index.ToString(),
+                    Step = step.TryGetValue("Step", out var s) ? (s?.ToString() ?? "").Trim() : "",
+                    TestDataText = step.TryGetValue("TestDataText", out var t) ? (t?.ToString() ?? "").Trim() : "",
+                    TestData = step.TryGetValue("TestData", out var td) && td is Dictionary<string, object> dict
+                        ? dict
+                        : new Dictionary<string, object>()
+                };
+
+                collection.Add(model);
+                index++;
+            }
         }
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // update normalized for each testcase
-                foreach (var tc in _data)
-                {
-                    string id = tc["testcaseid"]?.ToString();
-                    if (id == null) continue;
+                string selectedId = TestCaseSelector.SelectedItem?.ToString();
+                if (string.IsNullOrEmpty(selectedId)) return;
 
-                    // find which steps are currently displayed
-                    if (TestCaseSelector.SelectedItem?.ToString() == id)
+                var tc = _data.FirstOrDefault(x => x["testcaseid"]?.ToString() == selectedId);
+                if (tc == null) return;
+
+                var items = NormalizedGrid.ItemsSource as ObservableCollection<StepModel>;
+                if (items != null && items.Count > 0)
+                {
+                    var updatedSteps = items.Select((x, idx) => new Dictionary<string, object>
                     {
-                        var items = NormalizedGrid.ItemsSource as ObservableCollection<StepModel>;
-                        if (items != null)
-                        {
-                            tc["normalized"] = items
-    .Select(x => new Dictionary<string, object>
-    {
-        ["Index"] = x.Index,
-        ["Step"] = x.Step,
-        ["TestDataText"] = x.TestDataText,
-        ["TestData"] = x.TestData   // <-- KEEP ORIGINAL TESTDATA
-    }).ToList();
-                        }
-                    }
+                        ["Index"] = (idx + 1).ToString(),
+                        ["Step"] = x.Step?.Trim() ?? "",
+                        ["TestDataText"] = x.TestDataText?.Trim() ?? "",
+                        ["TestData"] = x.TestData ?? new Dictionary<string, object>()
+                    }).ToList();
+
+                    tc["normalized"] = updatedSteps;
                 }
 
                 UpdatedNormalizedList = _data;
                 DialogResult = true;
+                Close();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error saving: {ex.Message}", "Save Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error saving changes:\n{ex.Message}", "Save Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
             DialogResult = false;
+            Close();
         }
 
+        // ──────────────────────────────────────────────
+        // StepModel with INotifyPropertyChanged
+        // ──────────────────────────────────────────────
         public class StepModel : INotifyPropertyChanged
         {
-            private string _index;
-            private string _step;
-            private string _testDataText;
-            private Dictionary<string, object> _testData = new();   // <-- NEW
+            private string _index = "";
+            private string _step = "";
+            private string _testDataText = "";
+            private Dictionary<string, object> _testData = new();
 
             public string Index
             {
@@ -271,17 +213,16 @@ namespace JPMCGenAI_v1._0
                 set { _testDataText = value; OnPropertyChanged(); }
             }
 
-            // 🔥 NEW PROPERTY (to preserve TestData from Gemini)
             public Dictionary<string, object> TestData
             {
                 get => _testData;
-                set { _testData = value; OnPropertyChanged(); }
+                set { _testData = value ?? new Dictionary<string, object>(); OnPropertyChanged(); }
             }
 
             public event PropertyChangedEventHandler PropertyChanged;
 
-            protected void OnPropertyChanged([CallerMemberName] string name = null) =>
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            protected void OnPropertyChanged([CallerMemberName] string name = null)
+                => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
     }
 }
