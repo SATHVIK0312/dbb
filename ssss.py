@@ -9,13 +9,12 @@
         FontFamily="Segoe UI">
 
     <Window.Resources>
-        <!-- JPMC Flux Gold & Style -->
+        <!-- Your original styles (unchanged) -->
         <SolidColorBrush x:Key="Gold" Color="#D4AF37"/>
         <SolidColorBrush x:Key="LightGold" Color="#FFF8F0"/>
         <SolidColorBrush x:Key="DarkText" Color="#333333"/>
         <SolidColorBrush x:Key="BorderBrush" Color="#E2E1DC"/>
 
-        <!-- Clean Modern DataGrid -->
         <Style TargetType="DataGrid">
             <Setter Property="Background" Value="White"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -32,7 +31,7 @@
             <Setter Property="AutoGenerateColumns" Value="False"/>
             <Setter Property="CanUserAddRows" Value="False"/>
             <Setter Property="SelectionMode" Value="Single"/>
-            <!-- This ensures scrollbars appear when needed -->
+            <!-- This makes ONLY the table scroll -->
             <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
         </Style>
@@ -58,7 +57,6 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Gold Close Button -->
         <Style TargetType="Button">
             <Setter Property="Background" Value="#D4AF37"/>
             <Setter Property="Foreground" Value="White"/>
@@ -113,36 +111,35 @@
             <DropShadowEffect BlurRadius="30" Opacity="0.15" ShadowDepth="10" Color="#000000"/>
         </Border.Effect>
 
-        <!-- This ScrollViewer is the ONLY change needed for full scrolling -->
-        <ScrollViewer VerticalScrollBarVisibility="Auto" 
-                      HorizontalScrollBarVisibility="Disabled"
-                      Padding="0,0,0,20">
-            <Grid Margin="32">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <Grid Margin="32">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>      <!-- Header (fixed) -->
+                <RowDefinition Height="*"/>         <!-- Table area (scrollable) -->
+                <RowDefinition Height="Auto"/>      <!-- Footer (fixed) -->
+            </Grid.RowDefinitions>
 
-                <!-- Header -->
-                <StackPanel Grid.Row="0" Margin="0,0,0,24">
-                    <TextBlock Text="Generated Test Plan"
-                               FontSize="30"
-                               FontWeight="Bold"
-                               Foreground="#333333"/>
-                    <TextBlock Text="AI-generated execution plan with test data"
-                               FontSize="15"
-                               Foreground="#8C8575"
-                               Margin="0,8,0,0"/>
-                </StackPanel>
+            <!-- Header - Stays at top -->
+            <StackPanel Grid.Row="0" Margin="0,0,0,24">
+                <TextBlock Text="Generated Test Plan"
+                           FontSize="30"
+                           FontWeight="Bold"
+                           Foreground="#333333"/>
+                <TextBlock Text="AI-generated execution plan with test data"
+                           FontSize="15"
+                           Foreground="#8C8575"
+                           Margin="0,8,0,0"/>
+            </StackPanel>
 
-                <!-- Test Plan Table (now inside ScrollViewer) -->
-                <Border Grid.Row="1" 
-                        Background="White" 
-                        CornerRadius="18" 
-                        BorderBrush="#E2E1DC" 
-                        BorderThickness="1"
-                        Padding="0">
+            <!-- ONLY THE TABLE IS SCROLLABLE -->
+            <Border Grid.Row="1" 
+                    Background="White" 
+                    CornerRadius="18" 
+                    BorderBrush="#E2E1DC" 
+                    BorderThickness="1"
+                    Margin="0,0,0,20">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto"
+                              Padding="8">
                     <DataGrid x:Name="TestPlanGrid">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="#" 
@@ -173,19 +170,19 @@
                                                 CellStyle="{StaticResource TypeColumnStyle}"/>
                         </DataGrid.Columns>
                     </DataGrid>
-                </Border>
+                </ScrollViewer>
+            </Border>
 
-                <!-- Footer -->
-                <StackPanel Grid.Row="2" 
-                            Orientation="Horizontal" 
-                            HorizontalAlignment="Right" 
-                            Margin="0,32,0,8">
-                    <Button Content="Close" 
-                            Click="Close_Click" 
-                            Width="140" 
-                            Height="48"/>
-                </StackPanel>
-            </Grid>
-        </ScrollViewer>
+            <!-- Footer - Stays at bottom -->
+            <StackPanel Grid.Row="2" 
+                        Orientation="Horizontal" 
+                        HorizontalAlignment="Right" 
+                        Margin="0,10,0,8">
+                <Button Content="Close" 
+                        Click="Close_Click" 
+                        Width="140" 
+                        Height="48"/>
+            </StackPanel>
+        </Grid>
     </Border>
 </Window>
