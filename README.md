@@ -375,3 +375,19 @@ VALUES
 ('TC0003','demo 4','TC0001','login','["tag4"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
 ('TC0009','Verify a user with valid credentials can log in successfully.',NULL,'User should exist in the system.','["Login","Smoke"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL),
 ('TC0010','Verify the system shows an error for invalid login credentials.',NULL,NULL,'["Login","Negative"]','["PJ0001"]',NULL,NULL,NULL,NULL,NULL);
+
+
+
+--------------------
+
+INSERT INTO projectuser(userid, projectid) VALUES
+('a1', 'PJ0001'),
+('a1', 'PJ0002'),
+
+('a2', 'PJ0003'),
+
+('a3', 'PJ0001'),
+('a3', 'PJ0002'),
+('a3', 'PJ0003'),
+('a3', 'PJ0013'),
+('a3', 'PJ0014');
