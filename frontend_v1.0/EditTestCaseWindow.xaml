@@ -11,107 +11,33 @@
     <Window.Resources>
         <SolidColorBrush x:Key="Gold" Color="#D4AF37"/>
         <SolidColorBrush x:Key="LightGold" Color="#FFF8F0"/>
-        <SolidColorBrush x:Key="DarkText" Color="#333333"/>
+        <SolidColorBrush x:Key="DarkText" Color="#333"/>
         <SolidColorBrush x:Key="BorderBrush" Color="#E2E1DC"/>
 
-        <!-- Gold Button -->
         <Style x:Key="GoldButton" TargetType="Button">
             <Setter Property="Background" Value="#D4AF37"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="20,12"/>
-            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="14">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#B8952D"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
         </Style>
 
-        <!-- Red Button -->
         <Style x:Key="RedButton" TargetType="Button" BasedOn="{StaticResource GoldButton}">
             <Setter Property="Background" Value="#E74C3C"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#C0392B"/>
-                </Trigger>
-            </Style.Triggers>
         </Style>
 
         <Style x:Key="CancelButton" TargetType="Button">
-            <Setter Property="Background" Value="#999999"/>
+            <Setter Property="Background" Value="#999"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="20,12"/>
-            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="14">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#777777"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- DataGrid Style -->
-        <Style TargetType="DataGrid">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="#E2E1DC"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="RowBackground" Value="White"/>
-            <Setter Property="AlternatingRowBackground" Value="#FFFBF5"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#EEEEEE"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="ColumnHeaderHeight" Value="48"/>
-            <Setter Property="RowHeight" Value="50"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="CanUserAddRows" Value="False"/>
-        </Style>
-
-        <Style TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#FFF8F0"/>
-            <Setter Property="Foreground" Value="#D4AF37"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Padding" Value="16,0"/>
-        </Style>
-
-        <Style TargetType="DataGridCell">
-            <Setter Property="Padding" Value="16,0"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFF0E0"/>
-                    <Setter Property="BorderBrush" Value="#D4AF37"/>
-                </Trigger>
-            </Style.Triggers>
         </Style>
     </Window.Resources>
 
-    <!-- Main Card with Shadow -->
-    <Border Margin="28" Background="White" CornerRadius="24" BorderBrush="#E2E1DC" BorderThickness="1">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="30" Opacity="0.15" ShadowDepth="10"/>
-        </Border.Effect>
 
+    <Border Margin="28" Background="White" CornerRadius="24" BorderBrush="#E2E1DC" BorderThickness="1">
         <Grid Margin="36">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -120,7 +46,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Title (Test Case ID) -->
+            <!-- Title -->
             <TextBlock x:Name="IdLbl"
                        Grid.Row="0"
                        FontSize="28"
@@ -128,7 +54,7 @@
                        Foreground="#D4AF37"
                        Margin="0,0,0,20"/>
 
-            <!-- Add / Delete Buttons -->
+            <!-- Buttons -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,24">
                 <Button Content="Add Step"
                         Style="{StaticResource GoldButton}"
@@ -141,34 +67,34 @@
                         Click="DeleteStep_Click"/>
             </StackPanel>
 
-            <!-- Steps Table -->
-            <Border Grid.Row="2" 
-                    Background="White" 
-                    CornerRadius="18" 
-                    BorderBrush="#E2E1DC" 
-                    BorderThickness="1">
+            <!-- The GRID YOU ARE MISSING -->
+            <Border Grid.Row="2" Background="White" CornerRadius="18" BorderBrush="#E2E1DC" BorderThickness="1">
                 <DataGrid x:Name="StepsGrid"
-                          AutoGenerateColumns="False">
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False">
+
                     <DataGrid.Columns>
+
                         <DataGridTextColumn Header="Step No"
                                             Binding="{Binding StepNo}"
                                             IsReadOnly="True"
-                                            Width="0.6*"/>
+                                            Width="0.5*"/>
+
                         <DataGridTextColumn Header="Step Description"
                                             Binding="{Binding Step}"
                                             Width="2*"/>
+
                         <DataGridTextColumn Header="Test Data / Parameters"
                                             Binding="{Binding TestDataText}"
-                                            Width="1.2*"/>
+                                            Width="1.5*"/>
+
                     </DataGrid.Columns>
+
                 </DataGrid>
             </Border>
 
-            <!-- Footer Buttons -->
-            <StackPanel Grid.Row="3" 
-                        Orientation="Horizontal" 
-                        HorizontalAlignment="Right" 
-                        Margin="0,32,0,8">
+            <!-- Footer -->
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,32,0,8">
                 <Button Content="Save Changes"
                         Style="{StaticResource GoldButton}"
                         Width="160"
@@ -179,6 +105,7 @@
                         Margin="12,0,0,0"
                         Click="Cancel_Click"/>
             </StackPanel>
+
         </Grid>
     </Border>
 </Window>
