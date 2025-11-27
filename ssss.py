@@ -1,106 +1,221 @@
-<Window x:Class="jpmc_genai.NormalizePreviewWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Normalized Steps Review & Edit"
-        Height="700" Width="1200"
-        WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResizeWithGrip"
-        Background="#F5F5F5"
-        FontFamily="Segoe UI">
-    
-    <Grid Margin="15">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
 
-        <!-- Test Case Selector -->
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,15">
-            <TextBlock Text="Select Test Case:" 
-                       VerticalAlignment="Center" 
-                       FontWeight="SemiBold" 
-                       Margin="0,0,10,0"/>
-            <ComboBox x:Name="TestCaseSelector"
-                      Width="350"
-                      Height="32"
-                      FontSize="14"
-                      Padding="8,5"
-                      SelectedIndex="0"
-                      SelectionChanged="TestCaseSelector_SelectionChanged"/>
-        </StackPanel>
+namespace jpmc_genai
+{
+    public partial class NormalizePreviewWindow : Window
+    {
+        private List<Dictionary<string, object>> _data;
+        public List<Dictionary<string, object>> UpdatedNormalizedList { get; private set; }
 
-        <!-- Side-by-Side Comparison -->
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="8"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+        public NormalizePreviewWindow(List<Dictionary<string, object>> normalizedData)
+        {
+            InitializeComponent();
+            _data = normalizedData ?? new List<Dictionary<string, object>>();
 
-            <!-- Original Steps (Read-Only) -->
-            <GroupBox Header="Original Steps" Grid.Column="0" Padding="8">
-                <DataGrid x:Name="OriginalGrid"
-                          IsReadOnly="True"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          GridLinesVisibility="All"
-                          HeadersVisibility="Column"
-                          Background="White"
-                          RowBackground="#FAFAFA"
-                          AlternatingRowBackground="#F0F0F0"
-                          BorderBrush="#CCCCCC">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="60" FontWeight="Bold"/>
-                        <DataGridTextColumn Header="Step Description" Binding="{Binding Step}" Width="*" />
-                        <DataGridTextColumn Header="Test Data" Binding="{Binding TestDataText}" Width="220"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </GroupBox>
+            if (_data.Count == 0)
+            {
+                MessageBox.Show("No test cases to display.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Close();
+                return;
+            }
 
-            <!-- Separator -->
-            <Border Grid.Column="1" Background="#DDDDDD" Width="1" Margin="0,10"/>
+            // Populate ComboBox
+            var ids = _data.Select(x => x["testcaseid"]?.ToString() ?? "Unknown").ToList();
+            TestCaseSelector.ItemsSource = ids;
+            if (ids.Count > 0) TestCaseSelector.SelectedIndex = 0;
+        }
 
-            <!-- Normalized Steps (Editable) -->
-            <GroupBox Header="Normalized Steps (Editable)" Grid.Column="2" Padding="8">
-                <DataGrid x:Name="NormalizedGrid"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          GridLinesVisibility="All"
-                          HeadersVisibility="Column"
-                          Background="White"
-                          RowBackground="#FFFFFF"
-                          AlternatingRowBackground="#E8F5E9"
-                          BorderBrush="#4CAF50">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="60" IsReadOnly="True" FontWeight="Bold"/>
-                        <DataGridTextColumn Header="Step Description" Binding="{Binding Step, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                        <DataGridTextColumn Header="Test Data (Text)" Binding="{Binding TestDataText, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </GroupBox>
-        </Grid>
+        private void TestCaseSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (TestCaseSelector.SelectedItem is not string selectedId) return;
 
-        <!-- Action Buttons -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-            <Button Content="Cancel" 
-                    Width="130" Height="40" 
-                    Margin="0,0,15,0" 
-                    Click="Cancel_Click"
-                    Background="#B0BEC5" 
-                    Foreground="White" 
-                    FontSize="14"
-                    Padding="10,0"/>
-            <Button Content="Save Changes" 
-                    Width="160" Height="40" 
-                    Click="Save_Click"
-                    Background="#4CAF50" 
-                    Foreground="White" 
-                    FontSize="14"
-                    FontWeight="SemiBold"
-                    Padding="10,0"/>
-        </StackPanel>
-    </Grid>
-</Window>
+            var tc = _data.FirstOrDefault(x => x["testcaseid"]?.ToString() == selectedId);
+            if (tc == null) return;
+
+            LoadOriginalSteps(tc);
+            LoadNormalizedSteps(tc);
+        }
+
+        private void LoadOriginalSteps(Dictionary<string, object> tc)
+        {
+            var steps = new ObservableCollection<StepModel>();
+
+            if (tc.TryGetValue("original", out var originalData) && originalData != null)
+            {
+                var list = ConvertToStepList(originalData);
+                foreach (var item in list)
+                {
+                    steps.Add(CreateStepModel(item));
+                }
+            }
+
+            OriginalGrid.ItemsSource = steps;
+        }
+
+        private void LoadNormalizedSteps(Dictionary<string, object> tc)
+        {
+            var steps = new ObservableCollection<StepModel>();
+
+            if (tc.TryGetValue("normalized", out var normalizedData) && normalizedData != null)
+            {
+                var list = ConvertToStepList(normalizedData);
+                foreach (var item in list)
+                {
+                    steps.Add(CreateStepModel(item));
+                }
+            }
+
+            NormalizedGrid.ItemsSource = steps;
+        }
+
+        private List<Dictionary<string, object>> ConvertToStepList(object data)
+        {
+            var result = new List<Dictionary<string, object>>();
+
+            try
+            {
+                if (data is JsonElement je)
+                {
+                    if (je.ValueKind == JsonValueKind.Array)
+                    {
+                        return je.Deserialize<List<Dictionary<string, object>>>() ?? new();
+                    }
+                }
+                else if (data is List<Dictionary<string, object>> list)
+                {
+                    return list;
+                }
+                else if (data is IEnumerable<object> enumerable)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        var dict = ObjectToDictionary(item);
+                        if (dict != null) result.Add(dict);
+                    }
+                    return result;
+                }
+            }
+            catch { /* ignored */ }
+
+            return result;
+        }
+
+        private Dictionary<string, object> ObjectToDictionary(object obj)
+        {
+            if (obj is Dictionary<string, object> dict) return dict;
+            if (obj is JsonElement je) return je.Deserialize<Dictionary<string, object>>() ?? new();
+            if (obj is System.Collections.IDictionary idict)
+            {
+                var result = new Dictionary<string, object>();
+                foreach (var key in idict.Keys)
+                {
+                    result[key.ToString()!] = idict[key]!;
+                }
+                return result;
+            }
+            return null;
+        }
+
+        private StepModel CreateStepModel(Dictionary<string, object> data)
+        {
+            int index = 1;
+            if (data.TryGetValue("Index", out var idxObj) && int.TryParse(idxObj?.ToString(), out var parsed))
+                index = parsed;
+
+            return new StepModel
+            {
+                Index = index.ToString(),
+                Step = data.TryGetValue("Step", out var step) ? step?.ToString() ?? "" : "",
+                TestDataText = data.TryGetValue("TestDataText", out var tdt) ? tdt?.ToString() ?? "" : "",
+                TestData = data.TryGetValue("TestData", out var td) && td is Dictionary<string, object> dict 
+                    ? dict 
+                    : new Dictionary<string, object>()
+            };
+        }
+
+        private void Save_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedId = TestCaseSelector.SelectedItem?.ToString();
+                if (string.IsNullOrEmpty(selectedId)) return;
+
+                var tc = _data.FirstOrDefault(x => x["testcaseid"]?.ToString() == selectedId);
+                if (tc == null) return;
+
+                var editedSteps = (NormalizedGrid.ItemsSource as ObservableCollection<StepModel>)
+                                 ?.Select((s, i) => new Dictionary<string, object>
+                                 {
+                                     ["Index"] = (i + 1).ToString(),
+                                     ["Step"] = s.Step?.Trim() ?? "",
+                                     ["TestDataText"] = s.TestDataText?.Trim() ?? "",
+                                     ["TestData"] = s.TestData ?? new Dictionary<string, object>()
+                                 }).ToList();
+
+                if (editedSteps != null)
+                {
+                    tc["normalized"] = editedSteps;
+                }
+
+                UpdatedNormalizedList = _data;
+                DialogResult = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Save failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void Cancel_Click(object sender, RoutedEventArgs e)
+        {
+            DialogResult = false;
+            Close();
+        }
+
+        // ViewModel for each step
+        public class StepModel : INotifyPropertyChanged
+        {
+            private string _index = "";
+            private string _step = "";
+            private string _testDataText = "";
+            private Dictionary<string, object> _testData = new();
+
+            public string Index
+            {
+                get => _index;
+                set { _index = value; OnPropertyChanged(); }
+            }
+
+            public string Step
+            {
+                get => _step;
+                set { _step = value; OnPropertyChanged(); }
+            }
+
+            public string TestDataText
+            {
+                get => _testDataText;
+                set { _testDataText = value; OnPropertyChanged(); }
+            }
+
+            public Dictionary<string, object> TestData
+            {
+                get => _testData;
+                set { _testData = value ?? new(); OnPropertyChanged(); }
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+            protected void OnPropertyChanged([CallerMemberName] string name = null) =>
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+    }
+}
