@@ -1,147 +1,229 @@
-# ------------------ Response Models ------------------
-from pydantic import BaseModel
-from typing import List, Dict, Any
-import json
-import logging
-from fastapi import Body, HTTPException
-
-class ReusableMethodResponse(BaseModel):
-    name: str
-    code: str
-    saved_to_db: bool = False
-
-class GeneratedScriptResponse(BaseModel):
-    testcase_id: str
-    script_type: str
-    script_lang: str
-    generated_script: str
-    reusable_methods: List[ReusableMethodResponse]
-    saved_count: int = 0
-    model_used: str = "gpt-4o"  # will be overridden dynamically
-
-
-# ------------------ MAIN ENDPOINT ------------------
-@app.post("/generate-test-script/{testcase_id}", response_model=GeneratedScriptResponse)
-async def generate_test_script(
+@app.websocket("/testcases/{testcase_id}/execute-with-madl")
+async def execute_testcase_with_madl(
+    websocket: WebSocket,
     testcase_id: str,
-    script_type: str = Body(..., example="playwright"),
-    script_lang: str = Body(..., example="python"),
-    include_prereq: bool = Body(False),
-    testplan: Dict[str, Any] = Body(...),
+    script_type: str
 ):
-    """
-    Generate modular, reusable automation script + extract methods using Azure OpenAI (GPT-4o)
-    Uses your existing get_azure_openai_client() → SPN + cert + fallback
-    """
+    await websocket.accept()
+    logger = StructuredLogger(testcase_id)
+    logger.info(LogCategory.INITIALIZATION, f"Execution started: {testcase_id} | {script_type}")
+
+    conn = None
     try:
-        script_type = script_type.lower()
-        script_lang = script_lang.lower()
+        # === Extract & Validate JWT (exactly as before) ===
+        token = None
+        for k, v in websocket.scope.get("headers", []):
+            if k == b"authorization":
+                try:
+                    token = v.decode().split("Bearer ")[1].strip()
+                except:
+                    pass
+                break
 
-        if script_type not in ("playwright", "selenium"):
-            raise HTTPException(400, "script_type must be 'playwright' or 'selenium'")
-        if script_lang not in ("python", "java"):
-            raise HTTPException(400, "script_lang must be 'python' or 'java'")
+        if not token:
+            await websocket.send_text(json.dumps({"error": "Missing token", "status": "FAILED"}))
+            return
 
-        prereq_text = ("Include prerequisite steps (browser launch, login, navigation, etc.)"
-                       if include_prereq else "Skip all prerequisites. Start directly from the first test action.")
+        from jose import jwt, JWTError
+        try:
+            payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
+            userid = payload.get("userid")
+        except JWTError:
+            await websocket.send_text(json.dumps({"error": "Invalid token", "status": "FAILED"}))
+            return
+
+        # === DB Connection & Access Check ===
+        conn = await db.get_db_connection()
+
+        tc_row = await conn.fetchrow(
+            "SELECT projectid FROM testcase WHERE testcaseid = $1", testcase_id
+        )
+        if not tc_row:
+            await websocket.send_text(json.dumps({"error": "Test case not found", "status": "FAILED"}))
+            return
+
+        user_projects = await conn.fetchval(
+            "SELECT projectid FROM projectuser WHERE userid = $1", userid
+        )
+        user_projects = set(from_json(user_projects)) if user_projects else set()
+        tc_projects = set(from_json(tc_row["projectid"]))
+
+        if not (user_projects & tc_projects):
+            await websocket.send_text(json.dumps({"error": "Unauthorized", "status": "FAILED"}))
+            return
+
+        # === Build Test Plan ===
+        await websocket.send_text(json.dumps({"status": "BUILDING_PLAN", "log": "Building test plan..."}))
+
+        prereq_chain = await utils.get_prereq_chain(conn, testcase_id)
+        testplan = {"pretestid_steps": {}, "current_bdd_steps": {}}
+
+        for tid in prereq_chain[:-1]:
+            row = await conn.fetchrow(
+                "SELECT steps, args FROM teststep WHERE testcaseid = $1", tid
+            )
+            if row and row["steps"]:
+                testplan["pretestid_steps"][tid] = dict(zip(from_json(row["steps"]), from_json(row["args"])))
+
+        current_row = await conn.fetchrow(
+            "SELECT steps, args FROM teststep WHERE testcaseid = $1", testcase_id
+        )
+        if current_row and current_row["steps"]:
+            testplan["current_bdd_steps"] = dict(zip(from_json(current_row["steps"]), from_json(current_row["args"])))
+
+        testplan_json = json.dumps(testplan, indent=2)
+        await websocket.send_text(json.dumps({"status": "PLAN_READY", "log": "Test plan built"}))
+
+        # === Generate Script using Azure OpenAI (no MADL) ===
+        await websocket.send_text(json.dumps({"status": "GENERATING", "log": "Generating script..."}))
 
         prompt = f"""
-You are an expert {script_type} automation engineer writing clean, modular {script_lang} code.
+Generate a complete, executable Python {script_type} test script for test case {testcase_id}.
 
-TEST CASE ID: {testcase_id}
-FRAMEWORK: {script_type}
-LANGUAGE: {script_lang}
-{prereq_text}
+Prerequisites:
+{json.dumps(testplan["pretestid_steps"], indent=2)}
 
-TEST PLAN:
-{json.dumps(testplan, indent=2, ensure_ascii=False)}
+Current steps:
+{json.dumps(testplan["current_bdd_steps"], indent=2)}
 
-INSTRUCTIONS:
-- Break down every logical action into a reusable method
-- Put all reusable methods inside a class called `AutomationHelper`
-- Write a main test function that orchestrates everything
-- Use proper escaping: represent newlines in strings as \\n
-- Return ONLY a valid JSON object with this exact structure:
-
-{{
-  "script": "<full executable script with \\n for line breaks>",
-  "methods": [
-    {{
-      "method_name": "login_user",
-      "class_name": "AutomationHelper",
-      "intent": "Logs in user with credentials",
-      "semantic_description": "Goes to login page, fills form, submits, waits for dashboard",
-      "keywords": ["login", "auth", "signin"],
-      "parameters": "page, username: str, password: str",
-      "return_type": "None",
-      "full_signature": "AutomationHelper.login_user(page, username, password)",
-      "example": "helper.login_user(page, 'user@test.com', 'Pass123!')",
-      "method_code": "def login_user(self, page, username: str, password: str):\\n    page.goto('https://app.com/login')\\n    ..."
-    }}
-  ]
-}}
-
-Do not include markdown, code fences, or explanations. Only the JSON.
+Requirements:
+- Use sync API
+- Wrap every action in try/except
+- Print before: "Running action: <step> at <timestamp>"
+- Print after: "Action completed: <step> at <timestamp>"
+- On error: print "Action <step> failed due to: <error>"
+- Save screenshot → error_screenshot.png
+- Save DOM → page_dom_dump.txt
+- Output ONLY raw Python code. No markdown, no explanations.
 """
 
-        # Use your existing, battle-tested client
         client = get_azure_openai_client()
-
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},   # Forces valid JSON
-            temperature=0.1,
+            temperature=0.0,
             max_tokens=4000,
-            top_p=0.95,
             timeout=300
         )
 
-        raw_output = response.choices[0].message.content.strip()
+        raw_script = response.choices[0].message.content.strip()
+        script = raw_script
+        if "```" in raw_script:
+            parts = raw_script.split("```")
+            if len(parts) >= 3:
+                script = parts[2].strip()
+            elif "python" in parts[1]:
+                script = parts[1].split("python", 1)[-1].strip()
+            else:
+                script = parts[1].strip()
 
-        # Safe JSON parsing
+        # === Execute Script ===
+        await websocket.send_text(json.dumps({"status": "EXECUTING", "log": "Running script..."}))
+
+        temp_path = None
+        execution_output = ""
         try:
-            data = json.loads(raw_output)
-        except json.JSONDecodeError as e:
-            logging.error(f"[GENERATE] Invalid JSON from model: {e}\nOutput: {raw_output[:1000]}")
-            raise HTTPException(500, "AI returned invalid JSON format")
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+                f.write(script)
+                temp_path = f.name
 
-        script_raw = data.get("script", "")
-        methods_raw = data.get("methods", [])
+            process = subprocess.Popen(
+                [sys.executable, temp_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
 
-        if not script_raw:
-            raise HTTPException(500, "Generated script is empty")
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    execution_output += line + "\n"
+                    await websocket.send_text(json.dumps({"status": "RUNNING", "log": line}))
+                await asyncio.sleep(0.01)
 
-        # Convert \n → real newlines
-        full_script = script_raw.replace("\\n", "\n").strip()
+            return_code = process.wait()
 
-        # Extract reusable methods
-        reusable_methods = []
-        for m in methods_raw:
-            method_code = m.get("method_code", "")
-            if method_code and ("def " in method_code or "public " in method_code or "void " in method_code):
-                clean_code = method_code.replace("\\n", "\n").strip()
-                # Basic validation
-                if clean_code.startswith(("def ", "public ", "private ", "protected ")):
-                    reusable_methods.append(ReusableMethodResponse(
-                        name=m.get("method_name", "unnamed_method"),
-                        code=clean_code
-                    ))
+            if return_code == 0:
+                status = "SUCCESS"
+                message = "Script executed successfully"
+            else:
+                # === Auto-Healing ===
+                await websocket.send_text(json.dumps({"status": "AUTO_HEALING", "log": "Healing..."}))
+                logger.info(LogCategory.HEALING, "Self-healing triggered")
 
-        model_used = response.model  # e.g., "gpt-4o-2024-08-06"
+                healed_code = await ai_healing.self_heal(
+                    testplan_output=testplan_json,
+                    generated_script=script,
+                    execution_logs=execution_output,
+                    screenshot=None,
+                    dom_snapshot=None
+                )
 
-        return GeneratedScriptResponse(
-            testcase_id=testcase_id,
-            script_type=script_type,
-            script_lang=script_lang,
-            generated_script=full_script,
-            reusable_methods=reusable_methods,
-            saved_count=len(reusable_methods),
-            model_used=model_used
-        )
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+                    f.write(healed_code)
+                    healed_path = f.name
 
-    except HTTPException:
-        raise
+                healed_process = subprocess.Popen(
+                    [sys.executable, healed_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+
+                healed_output = ""
+                for line in healed_process.stdout:
+                    line = line.rstrip()
+                    if line:
+                        healed_output += line + "\n"
+                        await websocket.send_text(json.dumps({"status": "RUNNING", "log": f"[HEALED] {line}"}))
+                    await asyncio.sleep(0.01)
+
+                healed_rc = healed_process.wait()
+                os.unlink(healed_path)
+
+                if healed_rc == 0:
+                    status = "SUCCESS"
+                    message = "Healed & passed"
+                    execution_output = healed_output
+                else:
+                    status = "FAILED"
+                    message = "Healing failed"
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+        # === Save Execution Result ===
+        exeid = await utils.get_next_exeid(conn)
+        await conn.execute("""
+            INSERT INTO execution 
+            (exeid, testcaseid, scripttype, datestamp, exetime, message, output, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        """, exeid, testcase_id, script_type, datetime.now().date(), datetime.now().time(),
+           message, execution_output, status)
+
+        # === Final Message (exact same format) ===
+        await websocket.send_text(json.dumps({
+            "status": "COMPLETED",
+            "final_status": status,
+            "log": message
+        }))
+
+        logger.success(LogCategory.INITIALIZATION, "Execution completed")
+
+    except WebSocketDisconnect:
+        logger.warning(LogCategory.INITIALIZATION, "Client disconnected")
     except Exception as e:
-        logging.exception(f"[GENERATE] Failed for {testcase_id}: {e}")
-        raise HTTPException(500, f"Script generation failed: {str(e)}")
+        logger.error(LogCategory.INITIALIZATION, f"Error: {e}")
+        try:
+            await websocket.send_text(json.dumps({"error": str(e), "status": "FAILED"}))
+        except:
+            pass
+    finally:
+        if conn:
+            await conn.close()
+        try:
+            await websocket.close()
+        except:
+            pass
