@@ -380,11 +380,10 @@ VALUES
 
 --------------------
 
-INSERT INTO projectuser(userid, projectid) VALUES
-('a1', 'PJ0001'),
-('a1', 'PJ0002'),
-
-('a2', 'PJ0003'),
+INSERT INTO projectuser (userid, projectid) VALUES
+('a1', '["PJ0001", "PJ0002"]'),
+('a2', '["PJ0003"]'),
+('a3', '["PJ0001", "PJ0002", "PJ0003", "PJ0013", "PJ0014"]');
 
 ('a3', 'PJ0001'),
 ('a3', 'PJ0002'),
