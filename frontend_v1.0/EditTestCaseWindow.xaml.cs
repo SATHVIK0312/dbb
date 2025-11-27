@@ -17,13 +17,18 @@ namespace jpmc_genai
 
             for (int i = 0; i < stepsInfo.steps.Count; i++)
             {
-                list.Add(new EditableStep
-                {
-                    StepNo = stepsInfo.stepNos.ElementAtOrDefault(i),
-                    Index = i + 1,
-                    Step = stepsInfo.steps[i],
-                    TestDataText = stepsInfo.args.ElementAtOrDefault(i) ?? ""
-                });
+              int rawStepNo = stepsInfo.stepNos.ElementAtOrDefault(i);
+
+// If StepNo is 0 or missing, auto-generate sequential number
+int finalStepNo = rawStepNo > 0 ? rawStepNo : i + 1;
+
+list.Add(new EditableStep
+{
+    StepNo = finalStepNo,
+    Index = i + 1,
+    Step = stepsInfo.steps[i],
+    TestDataText = stepsInfo.args.ElementAtOrDefault(i) ?? ""
+});
             }
 
             StepsGrid.ItemsSource = list;
