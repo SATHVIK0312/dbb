@@ -106,10 +106,10 @@
         </Style>
     </Window.Resources>
 
+    <!-- Main Card with Shadow -->
     <Border Margin="28" Background="White" CornerRadius="24" BorderBrush="#E2E1DC" BorderThickness="1">
         <Border.Effect>
             <DropShadowEffect BlurRadius="30" Opacity="0.15" ShadowDepth="10"/>
-        </DropShadowEffect>
         </Border.Effect>
 
         <Grid Margin="36">
@@ -120,6 +120,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- Title (Test Case ID) -->
             <TextBlock x:Name="IdLbl"
                        Grid.Row="0"
                        FontSize="28"
@@ -127,6 +128,7 @@
                        Foreground="#D4AF37"
                        Margin="0,0,0,20"/>
 
+            <!-- Add / Delete Buttons -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,24">
                 <Button Content="Add Step"
                         Style="{StaticResource GoldButton}"
@@ -139,38 +141,33 @@
                         Click="DeleteStep_Click"/>
             </StackPanel>
 
-            <Border Grid.Row="2"
-                    Background="White"
-                    CornerRadius="18"
-                    BorderBrush="#E2E1DC"
+            <!-- Steps Table -->
+            <Border Grid.Row="2" 
+                    Background="White" 
+                    CornerRadius="18" 
+                    BorderBrush="#E2E1DC" 
                     BorderThickness="1">
-                <DataGrid x:Name="StepsGrid" AutoGenerateColumns="False">
-
+                <DataGrid x:Name="StepsGrid"
+                          AutoGenerateColumns="False">
                     <DataGrid.Columns>
-
-                        <!-- StepNo Column -->
                         <DataGridTextColumn Header="Step No"
                                             Binding="{Binding StepNo}"
                                             IsReadOnly="True"
                                             Width="0.6*"/>
-
-                        <!-- Step Description -->
                         <DataGridTextColumn Header="Step Description"
                                             Binding="{Binding Step}"
                                             Width="2*"/>
-
-                        <!-- Test Data Column -->
                         <DataGridTextColumn Header="Test Data / Parameters"
                                             Binding="{Binding TestDataText}"
                                             Width="1.2*"/>
                     </DataGrid.Columns>
-
                 </DataGrid>
             </Border>
 
-            <StackPanel Grid.Row="3"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Right"
+            <!-- Footer Buttons -->
+            <StackPanel Grid.Row="3" 
+                        Orientation="Horizontal" 
+                        HorizontalAlignment="Right" 
                         Margin="0,32,0,8">
                 <Button Content="Save Changes"
                         Style="{StaticResource GoldButton}"
@@ -182,7 +179,6 @@
                         Margin="12,0,0,0"
                         Click="Cancel_Click"/>
             </StackPanel>
-
         </Grid>
     </Border>
 </Window>
