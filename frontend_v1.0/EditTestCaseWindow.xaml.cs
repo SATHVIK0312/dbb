@@ -19,10 +19,10 @@ namespace jpmc_genai
             {
                 list.Add(new EditableStep
                 {
-                    StepNo = stepsInfo.stepNos[i],              // NEW
+                    StepNo = stepsInfo.stepNos.ElementAtOrDefault(i),
                     Index = i + 1,
                     Step = stepsInfo.steps[i] ?? "",
-                    TestDataText = (i < stepsInfo.args.Count ? stepsInfo.args[i] : "") ?? ""
+                    TestDataText = stepsInfo.args.ElementAtOrDefault(i) ?? ""
                 });
             }
 
@@ -31,15 +31,15 @@ namespace jpmc_genai
 
         private void Save_Click(object sender, RoutedEventArgs e)
         {
-            EditableSteps = StepsGrid.Items
-                .OfType<EditableStep>()
-                .ToList();
+            var list = StepsGrid.Items.Cast<EditableStep>().ToList();
 
-            // Re-number StepNo final confirmation (in case user reordered steps)
-            for (int i = 0; i < EditableSteps.Count; i++)
+            // Renumber stepNo when saving
+            for (int i = 0; i < list.Count; i++)
             {
-                EditableSteps[i].StepNo = i + 1;
+                list[i].StepNo = i + 1;
             }
+
+            EditableSteps = list;
 
             DialogResult = true;
             Close();
@@ -50,14 +50,11 @@ namespace jpmc_genai
             Close();
         }
 
-        // ============================================================
-        // ADD STEP
-        // ============================================================
         private void AddStep_Click(object sender, RoutedEventArgs e)
         {
             var list = StepsGrid.Items.Cast<EditableStep>().ToList();
 
-            int nextStepNo = list.Count == 0 ? 1 : list.Max(s => s.StepNo) + 1;
+            int nextStepNo = list.Count + 1;
 
             list.Add(new EditableStep
             {
@@ -71,9 +68,6 @@ namespace jpmc_genai
             StepsGrid.ItemsSource = list;
         }
 
-        // ============================================================
-        // DELETE STEP
-        // ============================================================
         private void DeleteStep_Click(object sender, RoutedEventArgs e)
         {
             if (StepsGrid.SelectedItem is not EditableStep selected)
@@ -85,23 +79,15 @@ namespace jpmc_genai
             var list = StepsGrid.Items.Cast<EditableStep>().ToList();
             list.Remove(selected);
 
-            // Re-number after deletion
+            // Renumber everything
             for (int i = 0; i < list.Count; i++)
             {
                 list[i].Index = i + 1;
-                list[i].StepNo = i + 1;   // NEW: Reassign StepNo sequentially
+                list[i].StepNo = i + 1;
             }
 
             StepsGrid.ItemsSource = null;
             StepsGrid.ItemsSource = list;
         }
-    }
-
-    public class EditableStep
-    {
-        public int StepNo { get; set; }        // NEW
-        public int Index { get; set; }
-        public string Step { get; set; }
-        public string TestDataText { get; set; }
     }
 }
