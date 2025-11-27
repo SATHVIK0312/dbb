@@ -1,97 +1,124 @@
-@app.get("/testplan/{testcase_id}")
-async def get_testplan_json(
-    testcase_id: str,
-    current_user: dict = Depends(get_current_any_user)
-):
-    """
-    Returns full test plan JSON for execution:
-    - All prerequisite test cases (steps + args) in correct order
-    - Current test case BDD steps at the end
-    - Ready for AI executor and WPF viewer
-    """
-    conn = None
-    try:
-        conn = await get_db_connection()
-        userid = current_user["userid"]
+<Window x:Class="jpmc_genai.TestPlanViewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Test Plan Viewer"
+        Height="680" Width="1200"
+        WindowStartupLocation="CenterOwner"
+        Background="#FAF9F6"
+        ResizeMode="CanResize"
+        FontFamily="Segoe UI">
 
-        # 1. Get test case and its project(s)
-        tc_row = await (await conn.execute(
-            "SELECT projectid, pretestid FROM testcase WHERE testcaseid = ?",
-            (testcase_id,)
-        )).fetchone()
+    <Window.Resources>
+        <SolidColorBrush x:Key="Gold" Color="#D4AF37"/>
+        <SolidColorBrush x:Key="LightGold" Color="#FFF8F0"/>
+        <SolidColorBrush x:Key="DarkText" Color="#333333"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#E2E1DC"/>
 
-        if not tc_row:
-            raise HTTPException(status_code=404, detail="Test case not found")
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="RowBackground" Value="White"/>
+            <Setter Property="AlternatingRowBackground" Value="#FFFBF5"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#EEEEEE"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="ColumnHeaderHeight" Value="44"/>
+            <Setter Property="RowHeight" Value="48"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="SelectionMode" Value="Single"/>
+        </Style>
 
-        project_ids = from_json(tc_row["projectid"])
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource LightGold}"/>
+            <Setter Property="Foreground" Value="#D4AF37"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
 
-        # 2. Check user access
-        user_row = await (await conn.execute(
-            "SELECT projectid FROM projectuser WHERE userid = ?",
-            (userid,)
-        )).fetchone()
+        <Style TargetType="DataGridCell">
+            <Setter Property="Padding" Value="16,0"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#FFF0E0"/>
+                    <Setter Property="BorderBrush" Value="#D4AF37"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
 
-        if not user_row:
-            raise HTTPException(status_code=403, detail="You are not assigned to any project")
+        <Style x:Key="NumberColumnStyle" TargetType="DataGridCell">
+            <Setter Property="TextBlock.TextAlignment" Value="Center"/>
+            <Setter Property="TextBlock.FontWeight" Value="SemiBold"/>
+        </Style>
 
-        user_projects = from_json(user_row["projectid"])
-        if not any(pid in user_projects for pid in project_ids):
-            raise HTTPException(status_code=403, detail="You do not have access to this test case")
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#D4AF37"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="24,12"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" 
+                                CornerRadius="14" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#B8952D"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
-        # 3. Build prerequisite chain recursively (oldest → newest, including current)
-        async def get_prereq_chain(tc_id: str, visited=None):
-            if visited is None:
-                visited = set()
-            if tc_id in visited:
-                return []  # cycle detected
-            visited = visited.copy()  # prevent shared state
-            visited.add(tc_id)
+    <Border Margin="24" Background="White" CornerRadius="24" BorderBrush="#E2E1DC" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="30" Opacity="0.15" ShadowDepth="10" Color="#000000"/>
+        </Border.Effect>
 
-            row = await (await conn.execute(
-                "SELECT pretestid FROM testcase WHERE testcaseid = ?",
-                (tc_id,)
-            )).fetchone()
+        <Grid Margin="32">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-            if not row or not row["pretestid"]:
-                return [tc_id]
+            <!-- Header -->
+            <StackPanel Grid.Row="0" Margin="0,0,0,24">
+                <TextBlock Text="Generated Test Plan" FontSize="30" FontWeight="Bold" Foreground="#333333"/>
+                <TextBlock Text="AI-generated execution plan with test data" FontSize="15" Foreground="#8C8575" Margin="0,8,0,0"/>
+            </StackPanel>
 
-            chain = await get_prereq_chain(row["pretestid"], visited)
-            return chain + [tc_id]
+            <!-- DataGrid -->
+            <Border Grid.Row="1" Background="White" CornerRadius="18" BorderBrush="#E2E1DC" BorderThickness="1">
+                <DataGrid x:Name="TestPlanGrid" Margin="0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding RowNumber}" Width="60" CellStyle="{StaticResource NumberColumnStyle}"/>
+                        <DataGridTextColumn Header="Test Case ID" Binding="{Binding TestCaseId}" Width="140"/>
+                        <DataGridTextColumn Header="Step #" Binding="{Binding StepNumber}" Width="70" CellStyle="{StaticResource NumberColumnStyle}"/>
+                        <DataGridTextColumn Header="Step Description" Binding="{Binding Step}" Width="2*"/>
+                        <DataGridTextColumn Header="Test Data / Parameters" Binding="{Binding TestData}" Width="1.8*"/>
+                        <DataGridTextColumn Header="Type" Binding="{Binding TestCaseType}" Width="140"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
 
-        execution_order = await get_prereq_chain(testcase_id)  # e.g., ["PRE1", "PRE2", "MAIN123"]
-
-        # 4. Build final JSON
-        result = {
-            "pretestid_steps": {},
-            "pretestid_scripts": {},  # optional: populate if you have testscript table
-            "current_testid": testcase_id,
-            "current_bdd_steps": {}
-        }
-
-        # Process all test cases in execution order
-        for tc_id in execution_order:
-            steps_row = await (await conn.execute(
-                "SELECT steps, args FROM teststep WHERE testcaseid = ?",
-                (tc_id,)
-            )).fetchone()
-
-            if steps_row and steps_row["steps"]:
-                steps_list = from_json(steps_row["steps"])
-                args_list = from_json(steps_row["args"] or [])  # safety
-                step_dict = dict(zip(steps_list, args_list))
-
-                if tc_id == testcase_id:
-                    result["current_bdd_steps"] = step_dict
-                else:
-                    result["pretestid_steps"][tc_id] = step_dict
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[ERROR] get_testplan_json failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate test plan: {str(e)}")
-    finally:
-        if conn:
-            await conn.close()
+            <!-- Footer -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,32,0,8">
+                <Button Content="Close" Click="Close_Click" Width="140" Height="48"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>
