@@ -1,188 +1,71 @@
-<Window x:Class="jpmc_genai.TestPlanViewWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Test Plan Viewer"
-        Height="680" Width="1200"
-        WindowStartupLocation="CenterOwner"
-        Background="#FAF9F6"
-        ResizeMode="CanResize"
-        FontFamily="Segoe UI">
+@app.get("/execution")
+async def get_all_execution_logs(
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Returns all execution logs for test cases the current user has access to
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
 
-    <Window.Resources>
-        <!-- Your original styles (unchanged) -->
-        <SolidColorBrush x:Key="Gold" Color="#D4AF37"/>
-        <SolidColorBrush x:Key="LightGold" Color="#FFF8F0"/>
-        <SolidColorBrush x:Key="DarkText" Color="#333333"/>
-        <SolidColorBrush x:Key="BorderBrush" Color="#E2E1DC"/>
+        # 1. Get user's assigned projects
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
 
-        <Style TargetType="DataGrid">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="RowBackground" Value="White"/>
-            <Setter Property="AlternatingRowBackground" Value="#FFFBF5"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#EEEEEE"/>
-            <Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="ColumnHeaderHeight" Value="44"/>
-            <Setter Property="RowHeight" Value="48"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="IsReadOnly" Value="True"/>
-            <Setter Property="AutoGenerateColumns" Value="False"/>
-            <Setter Property="CanUserAddRows" Value="False"/>
-            <Setter Property="SelectionMode" Value="Single"/>
-            <!-- This makes ONLY the table scroll -->
-            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
-            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
-        </Style>
+        if not user_row or not user_row["projectid"]:
+            return []  # No projects → no logs
 
-        <Style TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="{StaticResource LightGold}"/>
-            <Setter Property="Foreground" Value="#D4AF37"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Padding" Value="16,0"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-        </Style>
+        user_projects = from_json(user_row["projectid"])
 
-        <Style TargetType="DataGridCell">
-            <Setter Property="Padding" Value="16,0"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFF0E0"/>
-                    <Setter Property="BorderBrush" Value="#D4AF37"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        # 2. Find all test cases in those projects
+        # Since projectid is JSON array string, use LIKE
+        accessible_testcase_ids = set()
 
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="#D4AF37"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="24,12"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" 
-                                CornerRadius="14"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#B8952D"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        for pid in user_projects:
+            rows = await (await conn.execute(
+                "SELECT testcaseid FROM testcase WHERE projectid LIKE ?",
+                (f'%{pid}%',)
+            )).fetchall()
 
-        <Style x:Key="NumberColumnStyle" TargetType="DataGridCell">
-            <Setter Property="Padding" Value="16,0"/>
-            <Setter Property="TextBlock.TextAlignment" Value="Center"/>
-            <Setter Property="TextBlock.FontWeight" Value="SemiBold"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFF0E0"/>
-                    <Setter Property="BorderBrush" Value="#D4AF37"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+            for row in rows:
+                accessible_testcase_ids.add(row["testcaseid"])
 
-        <Style x:Key="TypeColumnStyle" TargetType="DataGridCell">
-            <Setter Property="Padding" Value="16,0"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFF0E0"/>
-                    <Setter Property="BorderBrush" Value="#D4AF37"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-    </Window.Resources>
+        if not accessible_testcase_ids:
+            return []
 
-    <!-- Main Card with Shadow -->
-    <Border Margin="24" Background="White" CornerRadius="24" BorderBrush="#E2E1DC" BorderThickness="1">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="30" Opacity="0.15" ShadowDepth="10" Color="#000000"/>
-        </Border.Effect>
+        # 3. Fetch execution logs for these test cases
+        placeholders = ",".join(["?"] * len(accessible_testcase_ids))
+        query = f"""
+            SELECT exeid, testcaseid, scripttype, datestamp, exetime, message, output, status
+            FROM execution
+            WHERE testcaseid IN ({placeholders})
+            ORDER BY datestamp DESC, exetime DESC
+        """
 
-        <Grid Margin="32">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>      <!-- Header (fixed) -->
-                <RowDefinition Height="*"/>         <!-- Table area (scrollable) -->
-                <RowDefinition Height="Auto"/>      <!-- Footer (fixed) -->
-            </Grid.RowDefinitions>
+        rows = await (await conn.execute(query, tuple(accessible_testcase_ids))).fetchall()
 
-            <!-- Header - Stays at top -->
-            <StackPanel Grid.Row="0" Margin="0,0,0,24">
-                <TextBlock Text="Generated Test Plan"
-                           FontSize="30"
-                           FontWeight="Bold"
-                           Foreground="#333333"/>
-                <TextBlock Text="AI-generated execution plan with test data"
-                           FontSize="15"
-                           Foreground="#8C8575"
-                           Margin="0,8,0,0"/>
-            </StackPanel>
+        logs = []
+        for row in rows:
+            logs.append({
+                "exeid": row["exeid"],
+                "testcaseid": row["testcaseid"],
+                "scripttype": row["scripttype"],
+                "datestamp": row["datestamp"],
+                "exetime": str(row["exetime"]),
+                "message": row["message"] or "",
+                "output": row["output"] or "",
+                "status": row["status"] or "UNKNOWN"
+            })
 
-            <!-- ONLY THE TABLE IS SCROLLABLE -->
-            <Border Grid.Row="1" 
-                    Background="White" 
-                    CornerRadius="18" 
-                    BorderBrush="#E2E1DC" 
-                    BorderThickness="1"
-                    Margin="0,0,0,20">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Auto"
-                              Padding="8">
-                    <DataGrid x:Name="TestPlanGrid">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="#" 
-                                                Binding="{Binding RowNumber}" 
-                                                Width="50"
-                                                CellStyle="{StaticResource NumberColumnStyle}"/>
+        return logs
 
-                            <DataGridTextColumn Header="Test Case ID" 
-                                                Binding="{Binding TestCaseId}" 
-                                                Width="140"/>
-
-                            <DataGridTextColumn Header="Step #" 
-                                                Binding="{Binding StepNumber}" 
-                                                Width="60"
-                                                CellStyle="{StaticResource NumberColumnStyle}"/>
-
-                            <DataGridTextColumn Header="Step Description" 
-                                                Binding="{Binding Step}" 
-                                                Width="2*"/>
-
-                            <DataGridTextColumn Header="Test Data / Parameters" 
-                                                Binding="{Binding TestData}" 
-                                                Width="1.5*"/>
-
-                            <DataGridTextColumn Header="Type" 
-                                                Binding="{Binding TestCaseType}" 
-                                                Width="140"
-                                                CellStyle="{StaticResource TypeColumnStyle}"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </ScrollViewer>
-            </Border>
-
-            <!-- Footer - Stays at bottom -->
-            <StackPanel Grid.Row="2" 
-                        Orientation="Horizontal" 
-                        HorizontalAlignment="Right" 
-                        Margin="0,10,0,8">
-                <Button Content="Close" 
-                        Click="Close_Click" 
-                        Width="140" 
-                        Height="48"/>
-            </StackPanel>
-        </Grid>
-    </Border>
-</Window>
+    except Exception as e:
+        print(f"[ERROR] get_all_execution_logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch execution logs: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
