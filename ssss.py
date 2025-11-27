@@ -1,229 +1,129 @@
-@app.websocket("/testcases/{testcase_id}/execute-with-madl")
-async def execute_testcase_with_madl(
-    websocket: WebSocket,
-    testcase_id: str,
-    script_type: str
-):
-    await websocket.accept()
-    logger = StructuredLogger(testcase_id)
-    logger.info(LogCategory.INITIALIZATION, f"Execution started: {testcase_id} | {script_type}")
+# ==================== STRUCTURED LOGGING – FINAL SINGLE-FILE VERSION ====================
 
-    conn = None
-    try:
-        # === Extract & Validate JWT (exactly as before) ===
-        token = None
-        for k, v in websocket.scope.get("headers", []):
-            if k == b"authorization":
-                try:
-                    token = v.decode().split("Bearer ")[1].strip()
-                except:
-                    pass
-                break
+import json
+from datetime import datetime
+from enum import Enum
+from dataclasses import dataclass, asdict
+from typing import List, Dict, Any, Optional
+import logging
 
-        if not token:
-            await websocket.send_text(json.dumps({"error": "Missing token", "status": "FAILED"}))
-            return
+logger = logging.getLogger(__name__)
 
-        from jose import jwt, JWTError
-        try:
-            payload = jwt.decode(token, config.SECRET_KEY, algorithms=[config.ALGORITHM])
-            userid = payload.get("userid")
-        except JWTError:
-            await websocket.send_text(json.dumps({"error": "Invalid token", "status": "FAILED"}))
-            return
+class LogLevel(str, Enum):
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    SUCCESS = "SUCCESS"
+    ACTION = "ACTION"
 
-        # === DB Connection & Access Check ===
-        conn = await db.get_db_connection()
+class LogCategory(str, Enum):
+    INITIALIZATION = "INIT"
+    PLAN_BUILDING = "PLAN"
+    SEARCH = "SEARCH"
+    GENERATION = "GENERATION"
+    EXECUTION = "EXECUTION"
+    HEALING = "HEALING"
+    STORAGE = "STORAGE"
+    CLEANUP = "CLEANUP"
 
-        tc_row = await conn.fetchrow(
-            "SELECT projectid FROM testcase WHERE testcaseid = $1", testcase_id
-        )
-        if not tc_row:
-            await websocket.send_text(json.dumps({"error": "Test case not found", "status": "FAILED"}))
-            return
+@dataclass
+class StructuredLog:
+    timestamp: str
+    level: str
+    category: str
+    message: str
+    code: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    duration_ms: Optional[float] = None
 
-        user_projects = await conn.fetchval(
-            "SELECT projectid FROM projectuser WHERE userid = $1", userid
-        )
-        user_projects = set(from_json(user_projects)) if user_projects else set()
-        tc_projects = set(from_json(tc_row["projectid"]))
+    def to_dict(self):
+        return asdict(self)
 
-        if not (user_projects & tc_projects):
-            await websocket.send_text(json.dumps({"error": "Unauthorized", "status": "FAILED"}))
-            return
+    def to_json(self):
+        return json.dumps(self.to_dict())
 
-        # === Build Test Plan ===
-        await websocket.send_text(json.dumps({"status": "BUILDING_PLAN", "log": "Building test plan..."}))
+    def to_readable(self):
+        parts = [f"[{self.timestamp}]", f"[{self.level}]", f"[{self.category}]", self.message]
+        if self.code:
+            parts.append(f"(Code: {self.code})")
+        if self.duration_ms is not None:
+            parts.append(f"({self.duration_ms:.1f}ms)")
+        return " ".join(parts)
 
-        prereq_chain = await utils.get_prereq_chain(conn, testcase_id)
-        testplan = {"pretestid_steps": {}, "current_bdd_steps": {}}
+class StructuredLogger:
+    """Fully working SQLite-compatible structured logger"""
 
-        for tid in prereq_chain[:-1]:
-            row = await conn.fetchrow(
-                "SELECT steps, args FROM teststep WHERE testcaseid = $1", tid
-            )
-            if row and row["steps"]:
-                testplan["pretestid_steps"][tid] = dict(zip(from_json(row["steps"]), from_json(row["args"])))
+    def __init__(self, testcase_id: str):     # ✅ FIXED CONSTRUCTOR
+        self.testcase_id = testcase_id
+        self.logs: List[StructuredLog] = []
+        self.start_time = datetime.now()
 
-        current_row = await conn.fetchrow(
-            "SELECT steps, args FROM teststep WHERE testcaseid = $1", testcase_id
-        )
-        if current_row and current_row["steps"]:
-            testplan["current_bdd_steps"] = dict(zip(from_json(current_row["steps"]), from_json(current_row["args"])))
+    def _add(self, level: LogLevel, category: LogCategory, message: str,
+             code=None, details=None, duration_ms=None):
 
-        testplan_json = json.dumps(testplan, indent=2)
-        await websocket.send_text(json.dumps({"status": "PLAN_READY", "log": "Test plan built"}))
-
-        # === Generate Script using Azure OpenAI (no MADL) ===
-        await websocket.send_text(json.dumps({"status": "GENERATING", "log": "Generating script..."}))
-
-        prompt = f"""
-Generate a complete, executable Python {script_type} test script for test case {testcase_id}.
-
-Prerequisites:
-{json.dumps(testplan["pretestid_steps"], indent=2)}
-
-Current steps:
-{json.dumps(testplan["current_bdd_steps"], indent=2)}
-
-Requirements:
-- Use sync API
-- Wrap every action in try/except
-- Print before: "Running action: <step> at <timestamp>"
-- Print after: "Action completed: <step> at <timestamp>"
-- On error: print "Action <step> failed due to: <error>"
-- Save screenshot → error_screenshot.png
-- Save DOM → page_dom_dump.txt
-- Output ONLY raw Python code. No markdown, no explanations.
-"""
-
-        client = get_azure_openai_client()
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=4000,
-            timeout=300
+        entry = StructuredLog(
+            timestamp=datetime.now().isoformat(timespec="milliseconds"),
+            level=level.value,
+            category=category.value,
+            message=message,
+            code=code,
+            details=details,
+            duration_ms=duration_ms
         )
 
-        raw_script = response.choices[0].message.content.strip()
-        script = raw_script
-        if "```" in raw_script:
-            parts = raw_script.split("```")
-            if len(parts) >= 3:
-                script = parts[2].strip()
-            elif "python" in parts[1]:
-                script = parts[1].split("python", 1)[-1].strip()
-            else:
-                script = parts[1].strip()
+        self.logs.append(entry)
 
-        # === Execute Script ===
-        await websocket.send_text(json.dumps({"status": "EXECUTING", "log": "Running script..."}))
+        # send to console
+        level_map = {
+            LogLevel.DEBUG: logger.debug,
+            LogLevel.INFO: logger.info,
+            LogLevel.WARNING: logger.warning,
+            LogLevel.ERROR: logger.error,
+            LogLevel.SUCCESS: logger.info,
+            LogLevel.ACTION: logger.info,
+        }
+        level_map.get(level, logger.info)(entry.to_readable())
 
-        temp_path = None
-        execution_output = ""
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
-                f.write(script)
-                temp_path = f.name
+    def info(self, cat, msg, code=None, details=None):
+        self._add(LogLevel.INFO, cat, msg, code, details)
 
-            process = subprocess.Popen(
-                [sys.executable, temp_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
+    def success(self, cat, msg, code=None, details=None):
+        self._add(LogLevel.SUCCESS, cat, msg, code, details)
 
-            for line in process.stdout:
-                line = line.rstrip()
-                if line:
-                    execution_output += line + "\n"
-                    await websocket.send_text(json.dumps({"status": "RUNNING", "log": line}))
-                await asyncio.sleep(0.01)
+    def error(self, cat, msg, code=None, details=None):
+        self._add(LogLevel.ERROR, cat, msg, code, details)
 
-            return_code = process.wait()
+    def action(self, name, status, duration_ms=None, details=None):
+        self._add(LogLevel.ACTION, LogCategory.EXECUTION,
+                  f"Action '{name}' → {status}", code=name,
+                  duration_ms=duration_ms, details=details)
 
-            if return_code == 0:
-                status = "SUCCESS"
-                message = "Script executed successfully"
-            else:
-                # === Auto-Healing ===
-                await websocket.send_text(json.dumps({"status": "AUTO_HEALING", "log": "Healing..."}))
-                logger.info(LogCategory.HEALING, "Self-healing triggered")
+    def step(self, step_name, step_num, status, duration_ms, error=None, screenshot=None):
+        details = {"step_number": step_num, "status": status, "duration_ms": duration_ms}
+        if error: details["error"] = error
+        if screenshot: details["screenshot"] = screenshot
 
-                healed_code = await ai_healing.self_heal(
-                    testplan_output=testplan_json,
-                    generated_script=script,
-                    execution_logs=execution_output,
-                    screenshot=None,
-                    dom_snapshot=None
-                )
+        level = LogLevel.SUCCESS if status == "PASS" else LogLevel.ERROR
 
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
-                    f.write(healed_code)
-                    healed_path = f.name
+        self._add(level, LogCategory.EXECUTION,
+                  f"Step {step_num}: {step_name}",
+                  code=f"STEP_{step_num:03d}",
+                  details=details)
 
-                healed_process = subprocess.Popen(
-                    [sys.executable, healed_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1
-                )
+    def get_readable_logs(self):
+        return "\n".join(log.to_readable() for log in self.logs)
 
-                healed_output = ""
-                for line in healed_process.stdout:
-                    line = line.rstrip()
-                    if line:
-                        healed_output += line + "\n"
-                        await websocket.send_text(json.dumps({"status": "RUNNING", "log": f"[HEALED] {line}"}))
-                    await asyncio.sleep(0.01)
+    def get_json_logs(self):
+        return json.dumps([log.to_dict() for log in self.logs], indent=2)
 
-                healed_rc = healed_process.wait()
-                os.unlink(healed_path)
-
-                if healed_rc == 0:
-                    status = "SUCCESS"
-                    message = "Healed & passed"
-                    execution_output = healed_output
-                else:
-                    status = "FAILED"
-                    message = "Healing failed"
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
-
-        # === Save Execution Result ===
-        exeid = await utils.get_next_exeid(conn)
-        await conn.execute("""
-            INSERT INTO execution 
-            (exeid, testcaseid, scripttype, datestamp, exetime, message, output, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """, exeid, testcase_id, script_type, datetime.now().date(), datetime.now().time(),
-           message, execution_output, status)
-
-        # === Final Message (exact same format) ===
-        await websocket.send_text(json.dumps({
-            "status": "COMPLETED",
-            "final_status": status,
-            "log": message
-        }))
-
-        logger.success(LogCategory.INITIALIZATION, "Execution completed")
-
-    except WebSocketDisconnect:
-        logger.warning(LogCategory.INITIALIZATION, "Client disconnected")
-    except Exception as e:
-        logger.error(LogCategory.INITIALIZATION, f"Error: {e}")
-        try:
-            await websocket.send_text(json.dumps({"error": str(e), "status": "FAILED"}))
-        except:
-            pass
-    finally:
-        if conn:
-            await conn.close()
-        try:
-            await websocket.close()
-        except:
-            pass
+    def get_summary(self):
+        total_time = (datetime.now() - self.start_time).total_seconds() * 1000
+        errors = sum(1 for l in self.logs if l.level == LogLevel.ERROR.value)
+        return {
+            "testcase_id": self.testcase_id,
+            "total_logs": len(self.logs),
+            "total_time_ms": round(total_time, 1),
+            "errors": errors,
+            "status": "SUCCESS" if errors == 0 else "FAILED"
+        }
