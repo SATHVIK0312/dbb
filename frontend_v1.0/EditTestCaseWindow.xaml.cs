@@ -21,7 +21,7 @@ namespace jpmc_genai
                 {
                     StepNo = stepsInfo.stepNos.ElementAtOrDefault(i),
                     Index = i + 1,
-                    Step = stepsInfo.steps[i] ?? "",
+                    Step = stepsInfo.steps[i],
                     TestDataText = stepsInfo.args.ElementAtOrDefault(i) ?? ""
                 });
             }
@@ -33,14 +33,13 @@ namespace jpmc_genai
         {
             var list = StepsGrid.Items.Cast<EditableStep>().ToList();
 
-            // Renumber stepNo when saving
             for (int i = 0; i < list.Count; i++)
             {
                 list[i].StepNo = i + 1;
+                list[i].Index = i + 1;
             }
 
             EditableSteps = list;
-
             DialogResult = true;
             Close();
         }
@@ -54,11 +53,9 @@ namespace jpmc_genai
         {
             var list = StepsGrid.Items.Cast<EditableStep>().ToList();
 
-            int nextStepNo = list.Count + 1;
-
             list.Add(new EditableStep
             {
-                StepNo = nextStepNo,
+                StepNo = list.Count + 1,
                 Index = list.Count + 1,
                 Step = "",
                 TestDataText = ""
@@ -72,22 +69,29 @@ namespace jpmc_genai
         {
             if (StepsGrid.SelectedItem is not EditableStep selected)
             {
-                MessageBox.Show("Please select a step to delete.");
+                MessageBox.Show("Select a step to delete.");
                 return;
             }
 
             var list = StepsGrid.Items.Cast<EditableStep>().ToList();
             list.Remove(selected);
 
-            // Renumber everything
             for (int i = 0; i < list.Count; i++)
             {
-                list[i].Index = i + 1;
                 list[i].StepNo = i + 1;
+                list[i].Index = i + 1;
             }
 
             StepsGrid.ItemsSource = null;
             StepsGrid.ItemsSource = list;
         }
+    }
+
+    public class EditableStep
+    {
+        public int StepNo { get; set; }
+        public int Index { get; set; }
+        public string Step { get; set; }
+        public string TestDataText { get; set; }
     }
 }
