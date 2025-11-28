@@ -1,57 +1,40 @@
-# ------------------ START EXECUTION ------------------
-await websocket.send_text(json.dumps({
-    "status": "EXECUTING",
-    "log": "Starting script execution..."
-}))
+from playwright.sync_api import sync_playwright
 
-execution_logs = []
-temp_file_path = None
+def test_google_search():
+    with sync_playwright() as p:
+        print("Launching Browser...")
+        # using channel="chrome" to fix potential 'spawn UNKNOWN' errors
+        browser = p.chromium.launch(headless=False, channel="chrome") 
+        page = browser.new_page()
 
-try:
-    # Write script to a temporary .py file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
-        temp_file.write(generated_script)
-        temp_file_path = temp_file.name
+        # 1. Navigate to Google
+        print("Step 1: Go to Google")
+        page.goto("https://www.google.com")
+        
+        # 2. Check we are actually on Google
+        print(f"   Page Title: {page.title()}")
+        assert "Google" in page.title()
 
-    logger.info(LogCategory.EXECUTION, f"Executing script from {temp_file_path}")
+        # 3. Type into the search bar
+        # Google's search box usually has the name attribute "q"
+        print("Step 2: Type search query")
+        page.fill('textarea[name="q"]', "Playwright Python")
 
-    # Launch script subprocess
-    process = subprocess.Popen(
-        [sys.executable, temp_file_path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        bufsize=1  # Line buffered
-    )
+        # 4. Press Enter to search
+        print("Step 3: Press Enter")
+        page.press('textarea[name="q"]', "Enter")
 
-    execution_output = ""
+        # 5. Wait for results to appear
+        # We wait for the 'result-stats' element (e.g., "About 20,000 results")
+        print("Step 4: Waiting for results...")
+        page.wait_for_selector("#result-stats")
+        
+        print("Test Passed: Search results loaded.")
+        
+        # Optional: Take a screenshot
+        page.screenshot(path="google_test.png")
+        
+        browser.close()
 
-    # Stream output line-by-line
-    for line in process.stdout:
-        line = line.rstrip("\n")
-        if line.strip():
-            execution_logs.append(line)
-            execution_output += line + "\n"
-
-            await websocket.send_text(json.dumps({
-                "status": "RUNNING",
-                "log": line
-            }))
-            await asyncio.sleep(0.02)
-
-    return_code = process.wait()
-
-    if return_code == 0:
-        logger.success(LogCategory.EXECUTION, "Script executed successfully")
-        execution_status = "SUCCESS"
-        execution_message = "Script executed successfully"
-    else:
-        logger.error(LogCategory.EXECUTION, "Script execution failed")
-        execution_status = "FAILED"
-        execution_message = "Script execution failed"
-
-finally:
-    if temp_file_path and os.path.exists(temp_file_path):
-        os.unlink(temp_file_path)
+if __name__ == "__main__":
+    test_google_search()
