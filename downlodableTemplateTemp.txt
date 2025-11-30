@@ -33,3 +33,9 @@ private void DownloadSample_Click(object sender, RoutedEventArgs e)
             "Error", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }
+
+
+
+
+------------------------------------------------
+<Button Content="Download Sample Excel" Style="{StaticResource GoldActionButton}" Height="48" Width="200" Click="DownloadSample_Click" Margin="0,10,0,0"/>
