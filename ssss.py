@@ -109,17 +109,64 @@ async def commit_staged_upload(
 
 
 
---------------------------------------
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+
+
+# ------------------------------------------------------
+# Normalized Step (No changes as requested)
+# ------------------------------------------------------
+class NormalizedStep(BaseModel):
+    """
+    One normalized step as returned by Gemini and posted back.
+    """
+    Index: Optional[int] = None
+    Step: str
+    TestDataText: Optional[str] = None
+    TestData: Optional[Dict[str, Any]] = None
+
+
+class NormalizedStepsUpdate(BaseModel):
+    """
+    Request body for /replace-normalized/{testcase_id}.
+    """
+    normalized_steps: List[NormalizedStep]
+
+
+# ------------------------------------------------------
+# MODELS FOR /commit-staged-upload  (SQLite Compatible)
+# ------------------------------------------------------
+
+class CommitStep(BaseModel):
+    """
+    One step inside the commit-staged-upload structure.
+    Sent from frontend after normalization.
+    """
+    step: str
+    steparg: Optional[str] = ""
+    stepno: Optional[int] = None
+
+
+class CommitTestCase(BaseModel):
+    """
+    A single staged test case to commit.
+    """
+    testcaseid: str
+    testdesc: Optional[str] = ""
+    pretestid: Optional[str] = ""
+    prereq: Optional[str] = ""
+    tags: Optional[List[str]] = []
+    steps: List[CommitStep]
+
+
 class CommitUploadData(BaseModel):
     """
     Request body for /commit-staged-upload.
-    User selects a single project, and passes staged testcases.
+    User selects a single project and sends staged testcases.
     """
-    projectid: str                  # Single project selected by user
-    testcases: List[Dict[str, Any]]
+    projectid: str
+    testcases: List[CommitTestCase]
 
-
-----------------------------------------------------
 
 class CommitUploadResponse(BaseModel):
     """
@@ -127,6 +174,7 @@ class CommitUploadResponse(BaseModel):
     """
     message: str
     testcases_committed: int
+
 
 
 
