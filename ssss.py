@@ -103,3 +103,17 @@ async def commit_staged_upload(
     finally:
         if conn:
             await conn.close()
+
+
+
+
+
+
+--------------------------------------
+class CommitUploadData(BaseModel):
+    """
+    Request body for /commit-staged-upload.
+    User selects a single project, and passes staged testcases.
+    """
+    projectid: str                  # Single project selected by user
+    testcases: List[Dict[str, Any]]
