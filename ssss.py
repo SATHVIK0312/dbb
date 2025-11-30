@@ -1,4 +1,5 @@
-@router.post("/commit-staged-upload", response_model=models.CommitUploadResponse)
+@router.post("/commit-staged-upload", response_model=models.CommitUploadResponse,
+             summary="Commit staged test cases to SQLite")
 async def commit_staged_upload(
         request: models.CommitUploadData,
         current_user: dict = Depends(get_current_any_user)
@@ -8,88 +9,101 @@ async def commit_staged_upload(
         conn = await db.get_db_connection()
         userid = current_user["userid"]
 
-        # User allowed projects
-        user_proj = await conn.fetchrow(
-            "SELECT projectid FROM projectuser WHERE userid = $1",
-            userid
+        # ---------------------------------------------------------
+        # 1. Get user projects (SQLite returns rows as tuples)
+        # ---------------------------------------------------------
+        rows = await conn.execute_fetchall(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
         )
-        if not user_proj:
+        if not rows:
             raise HTTPException(status_code=403, detail="User not assigned to any project")
 
-        allowed = user_proj["projectid"]
-        if isinstance(allowed, str):
-            allowed = {allowed}
+        raw_proj = rows[0][0]  # SQLite row → tuple
+        if isinstance(raw_proj, str):
+            allowed_projects = {raw_proj}
         else:
-            allowed = set(allowed)
+            allowed_projects = set(raw_proj)
 
+        # ---------------------------------------------------------
+        # 2. Validate project access
+        # ---------------------------------------------------------
         selected_project = request.projectid
-        if selected_project not in allowed:
+
+        if selected_project not in allowed_projects:
             raise HTTPException(
                 status_code=403,
-                detail=f"You do not have access to project {selected_project}"
+                detail=f"No access to project {selected_project}"
             )
 
         commit_count = 0
 
+        # ---------------------------------------------------------
+        # 3. LOOP THROUGH TEST CASES
+        # ---------------------------------------------------------
         for tc in request.testcases:
-            tc_id = tc.get("testcaseid") or None
-            if not tc_id:
-                continue
 
-            # Check duplicate
-            existing = await conn.fetchrow(
-                "SELECT testcaseid FROM testcase WHERE testcaseid = $1 AND $2 = ANY(projectid)",
-                tc_id, selected_project
+            tc_id = tc.testcaseid
+
+            # Check if testcaseid exists
+            exist_row = await conn.execute_fetchall(
+                "SELECT testcaseid FROM testcase WHERE testcaseid = ?",
+                (tc_id,)
             )
-            if existing:
+            if exist_row:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Test case ID {tc_id} already exists in project {selected_project}"
+                    detail=f"Test case {tc_id} already exists"
                 )
 
-            tags = tc.get("tags", [])
-            if isinstance(tags, str):
-                tags = [tags]
-
-            # Insert testcase
+            # ---------------------------------------------------------
+            # 4. Insert into TESTCASE table
+            # ---------------------------------------------------------
             await conn.execute(
                 """
                 INSERT INTO testcase
-                  (testcaseid, testdesc, pretestid, prereq, tag, projectid)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                (testcaseid, testdesc, pretestid, prereq, tag, projectid)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                tc_id,
-                tc.get("testdesc", ""),
-                tc.get("pretestid") or None,
-                tc.get("prereq") or None,
-                tags,
-                [selected_project]
+                (
+                    tc_id,
+                    tc.testdesc or "",
+                    tc.pretestid or None,
+                    tc.prereq or "",
+                    json.dumps(tc.tags),
+                    json.dumps([selected_project]),
+                )
             )
 
-            # Insert steps
-            # Extract correct step text and args from structured objects
-            steps_data = tc.get("steps", [])
-
-            # Build PURIFIED arrays for Postgres
+            # ---------------------------------------------------------
+            # 5. Extract steps → convert to arrays
+            # ---------------------------------------------------------
             step_texts = []
             step_args = []
 
-            for s in steps_data:
-                step_texts.append(s.get("step", "") or "")
-                step_args.append(s.get("steparg", "") or "")
+            for s in tc.steps:
+                step_texts.append(s.step or "")
+                step_args.append(s.steparg or "")
 
+            # ---------------------------------------------------------
+            # 6. Insert into TESTSTEP table
+            # ---------------------------------------------------------
             await conn.execute(
                 """
                 INSERT INTO teststep (testcaseid, steps, args, stepnum)
-                VALUES ($1, $2, $3, $4)
+                VALUES (?, ?, ?, ?)
                 """,
-                tc_id,
-                step_texts,  # VARCHAR[]
-                step_args,  # VARCHAR[]
-                len(step_texts)  # INTEGER
+                (
+                    tc_id,
+                    json.dumps(step_texts),  # JSON array stored in TEXT
+                    json.dumps(step_args),
+                    len(step_texts)
+                )
             )
 
             commit_count += 1
+
+        await conn.commit()
 
         return {
             "message": f"Upload committed successfully ({commit_count} test cases)",
@@ -103,9 +117,6 @@ async def commit_staged_upload(
     finally:
         if conn:
             await conn.close()
-
-
-
 
 
 
