@@ -1,0 +1,35 @@
+private void DownloadSample_Click(object sender, RoutedEventArgs e)
+{
+    try
+    {
+        string appFolder = AppDomain.CurrentDomain.BaseDirectory;
+        string samplePath = System.IO.Path.Combine(appFolder, "Assets", "SampleTestCase.xlsx");
+
+        if (!File.Exists(samplePath))
+        {
+            MessageBox.Show("Sample file not found.\nExpected at: " + samplePath,
+                "File Missing", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        // Ask user where to save
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = "SampleTestCase.xlsx",
+            Filter = "Excel Files (*.xlsx)|*.xlsx"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            File.Copy(samplePath, dialog.FileName, overwrite: true);
+
+            MessageBox.Show("Sample Excel downloaded successfully.",
+                "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+    catch (Exception ex)
+    {
+        MessageBox.Show("Failed to download sample: " + ex.Message,
+            "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+}
