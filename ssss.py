@@ -117,3 +117,14 @@ class CommitUploadData(BaseModel):
     """
     projectid: str                  # Single project selected by user
     testcases: List[Dict[str, Any]]
+
+
+----------------------------------------------------
+
+class CommitUploadResponse(BaseModel):
+    """
+    Response for /commit-staged-upload.
+    """
+    message: str
+    testcases_committed: int
+        
