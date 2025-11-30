@@ -1,5 +1,5 @@
 @router.post("/commit-staged-upload", response_model=models.CommitUploadResponse,
-             summary="Commit staged test cases to SQLite")
+             summary="Commit staged test cases to SQLite DB")
 async def commit_staged_upload(
         request: models.CommitUploadData,
         current_user: dict = Depends(get_current_any_user)
@@ -9,24 +9,25 @@ async def commit_staged_upload(
         conn = await db.get_db_connection()
         userid = current_user["userid"]
 
-        # ------------------------------------------
-        # 1. Validate user project access (SQLite)
-        # ------------------------------------------
-        user_proj_row = await conn.execute_fetchone(
+        # -------------------------------------------------------
+        # 1) FETCH USER PROJECTS (SQLite version using fetchall)
+        # -------------------------------------------------------
+        rows = await conn.fetch_all(
             "SELECT projectid FROM projectuser WHERE userid = ?",
             (userid,)
         )
 
-        if not user_proj_row:
+        if not rows:
             raise HTTPException(status_code=403, detail="User not assigned to any project")
 
-        # projectid stored as JSON string in SQLite
-        raw = user_proj_row[0]
+        # Since SQLite stores JSON text, decode it
+        allowed_raw = rows[0][0]
         try:
-            allowed_projects = set(json.loads(raw))
+            allowed_projects = set(json.loads(allowed_raw))
         except:
-            allowed_projects = {raw}
+            allowed_projects = {allowed_raw}
 
+        # User selected project
         selected_project = request.projectid
 
         if selected_project not in allowed_projects:
@@ -35,48 +36,48 @@ async def commit_staged_upload(
                 detail=f"You do not have access to project {selected_project}"
             )
 
-        # ------------------------------------------
-        # 2. Commit staged test cases
-        # ------------------------------------------
         commit_count = 0
 
+        # -------------------------------------------------------
+        # 2) COMMIT EACH TEST CASE
+        # -------------------------------------------------------
         for tc in request.testcases:
+
             tc_id = tc.testcaseid
 
-            # Check duplicate
-            existing = await conn.execute_fetchone(
+            # Check if testcase already exists
+            existing = await conn.fetch_all(
                 "SELECT testcaseid FROM testcase WHERE testcaseid = ?",
                 (tc_id,)
             )
             if existing:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Test case {tc_id} already exists"
+                    detail=f"Testcase {tc_id} already exists"
                 )
 
-            # Normalize tags → stored as JSON
+            # Prepare tags JSON
             tags = tc.tags or []
             tags_json = json.dumps(tags)
 
-            # Insert testcase
+            # Insert into testcase table
             await conn.execute(
                 """
-                INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, projectid)
+                INSERT INTO testcase
+                (testcaseid, testdesc, pretestid, prereq, tag, projectid)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tc_id,
                     tc.testdesc or "",
-                    tc.pretestid or None,
+                    tc.pretestid or "",
                     tc.prereq or "",
                     tags_json,
-                    json.dumps([selected_project])  # store as JSON
+                    json.dumps([selected_project])   # Stored as JSON
                 )
             )
 
-            # ------------------------------------------
-            # Extract steps from model
-            # ------------------------------------------
+            # Build steps arrays
             step_texts = []
             step_args = []
 
@@ -84,9 +85,7 @@ async def commit_staged_upload(
                 step_texts.append(s.step or "")
                 step_args.append(s.steparg or "")
 
-            # ------------------------------------------
             # Insert into teststep table
-            # ------------------------------------------
             await conn.execute(
                 """
                 INSERT INTO teststep (testcaseid, steps, args, stepnum)
@@ -94,8 +93,8 @@ async def commit_staged_upload(
                 """,
                 (
                     tc_id,
-                    json.dumps(step_texts),
-                    json.dumps(step_args),
+                    json.dumps(step_texts),   # JSON array
+                    json.dumps(step_args),    # JSON array
                     len(step_texts)
                 )
             )
@@ -104,18 +103,19 @@ async def commit_staged_upload(
 
         await conn.commit()
 
-        return {
-            "message": f"Upload committed successfully ({commit_count} test cases)",
-            "testcases_committed": commit_count
-        }
+        return models.CommitUploadResponse(
+            message=f"Upload committed successfully ({commit_count} test cases)",
+            testcases_committed=commit_count
+        )
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Commit failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Commit failed: {e}")
     finally:
         if conn:
             await conn.close()
+
 
 
 
