@@ -1,33 +1,44 @@
 @router.post("/commit-staged-upload", response_model=models.CommitUploadResponse,
-             summary="Commit staged test cases to SQLite DB")
+             summary="Commit staged test cases to database (SQLite version)")
 async def commit_staged_upload(
         request: models.CommitUploadData,
         current_user: dict = Depends(get_current_any_user)
 ):
+    """Commit staged upload into SQLite DB."""
+
+    import json
     conn = None
     try:
         conn = await db.get_db_connection()
         userid = current_user["userid"]
 
-        # -------------------------------------------------------
-        # 1) FETCH USER PROJECTS (SQLite version using fetchall)
-        # -------------------------------------------------------
-        rows = await conn.fetch_all(
-            "SELECT projectid FROM projectuser WHERE userid = ?",
-            (userid,)
+        # -------------------------
+        # 1. Fetch user's projects
+        # -------------------------
+        cursor = await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?", (userid,)
         )
+        rows = await cursor.fetchall()
 
         if not rows:
-            raise HTTPException(status_code=403, detail="User not assigned to any project")
+            raise HTTPException(status_code=403, detail="User is not assigned to ANY project")
 
-        # Since SQLite stores JSON text, decode it
-        allowed_raw = rows[0][0]
-        try:
-            allowed_projects = set(json.loads(allowed_raw))
-        except:
-            allowed_projects = {allowed_raw}
+        # SQLite stores JSON as TEXT → need to decode
+        allowed_projects = set()
 
-        # User selected project
+        for (proj_raw,) in rows:
+            try:
+                decoded = json.loads(proj_raw)
+                if isinstance(decoded, list):
+                    allowed_projects.update(decoded)
+                elif isinstance(decoded, str):
+                    allowed_projects.add(decoded)
+            except:
+                allowed_projects.add(proj_raw)
+
+        if not allowed_projects:
+            raise HTTPException(status_code=403, detail="No valid project IDs found for user")
+
         selected_project = request.projectid
 
         if selected_project not in allowed_projects:
@@ -38,54 +49,47 @@ async def commit_staged_upload(
 
         commit_count = 0
 
-        # -------------------------------------------------------
-        # 2) COMMIT EACH TEST CASE
-        # -------------------------------------------------------
+        # ---------------------------------------
+        # 2. Loop through incoming testcases
+        # ---------------------------------------
         for tc in request.testcases:
 
             tc_id = tc.testcaseid
 
-            # Check if testcase already exists
-            existing = await conn.fetch_all(
-                "SELECT testcaseid FROM testcase WHERE testcaseid = ?",
-                (tc_id,)
+            # Check duplicate testcase
+            cur = await conn.execute(
+                "SELECT testcaseid FROM testcase WHERE testcaseid = ?", (tc_id,)
             )
-            if existing:
+            exist_rows = await cur.fetchall()
+            if exist_rows:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Testcase {tc_id} already exists"
                 )
 
-            # Prepare tags JSON
             tags = tc.tags or []
-            tags_json = json.dumps(tags)
 
-            # Insert into testcase table
+            # Insert testcase
             await conn.execute(
                 """
-                INSERT INTO testcase
-                (testcaseid, testdesc, pretestid, prereq, tag, projectid)
+                INSERT INTO testcase (testcaseid, testdesc, pretestid, prereq, tag, projectid)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tc_id,
-                    tc.testdesc or "",
-                    tc.pretestid or "",
-                    tc.prereq or "",
-                    tags_json,
-                    json.dumps([selected_project])   # Stored as JSON
+                    tc.testdesc,
+                    tc.pretestid,
+                    tc.prereq,
+                    json.dumps(tags),
+                    json.dumps([selected_project])
                 )
             )
 
-            # Build steps arrays
-            step_texts = []
-            step_args = []
+            # Build steps + args arrays
+            step_texts = [step.step for step in tc.steps]
+            step_args = [step.steparg or "" for step in tc.steps]
 
-            for s in tc.steps:
-                step_texts.append(s.step or "")
-                step_args.append(s.steparg or "")
-
-            # Insert into teststep table
+            # Insert steps into teststep
             await conn.execute(
                 """
                 INSERT INTO teststep (testcaseid, steps, args, stepnum)
@@ -93,8 +97,8 @@ async def commit_staged_upload(
                 """,
                 (
                     tc_id,
-                    json.dumps(step_texts),   # JSON array
-                    json.dumps(step_args),    # JSON array
+                    json.dumps(step_texts),   # JSON text
+                    json.dumps(step_args),    # JSON text
                     len(step_texts)
                 )
             )
@@ -111,10 +115,11 @@ async def commit_staged_upload(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Commit failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Commit failed: {str(e)}")
     finally:
         if conn:
             await conn.close()
+
 
 
 
