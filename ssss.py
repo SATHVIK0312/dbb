@@ -1,377 +1,93 @@
-@router.post("/commit-staged-upload", response_model=models.CommitUploadResponse,
-             summary="Commit staged test cases to database (SQLite version)")
-async def commit_staged_upload(
-        request: models.CommitUploadData,
-        current_user: dict = Depends(get_current_any_user)
-):
-    """Commit staged test cases into SQLite."""
-    conn = None
-    try:
-        conn = await db.get_db_connection()
-        userid = current_user["userid"]
+#region Excel Parser & Models
+private List<GroupedTestCase> ParseExcelWithGrouping(string path)
+{
+    var result = new List<GroupedTestCase>();
+    GroupedTestCase current = null;
 
-        # ------------------------------------------------------
-        # 1. GET USER PROJECTS  (Use fetchall, not fetchone)
-        # ------------------------------------------------------
-        rows = await conn.fetchall(
-            "SELECT projectid FROM projectuser WHERE userid = ?",
-            (userid,)
-        )
+    using var package = new ExcelPackage(new FileInfo(path));
+    var ws = package.Workbook.Worksheets[0];
 
-        if not rows:
-            raise HTTPException(status_code=403, detail="User not assigned to any project")
+    // Validate header: StepNo must be at column 6 (Option A)
+    var headerStepNo = ws.Cells[1, 6].GetValue<string>()?.Trim();
+    if (string.IsNullOrWhiteSpace(headerStepNo) || !headerStepNo.Equals("StepNo", StringComparison.OrdinalIgnoreCase))
+        throw new Exception("Excel must contain 'StepNo' column at column 6 (before Step).");
 
-        # projectid stored as JSON string → load it
-        allowed_projects = set()
+    for (int row = 2; row <= ws.Dimension.End.Row; row++)
+    {
+        var rawId = ws.Cells[row, 1].GetValue<string>()?.Trim();
+        string id = string.IsNullOrWhiteSpace(rawId) ? current?.TestCaseId : rawId;
 
-        for r in rows:
-            raw = r[0]
-            try:
-                data = json.loads(raw) if isinstance(raw, str) else raw
-                if isinstance(data, list):
-                    allowed_projects.update(data)
-                elif isinstance(data, str):
-                    allowed_projects.add(data)
-            except:
-                allowed_projects.add(raw)
+        // SKIP empty rows until first real test case appears
+        if (string.IsNullOrWhiteSpace(rawId) && current == null)
+            continue;
 
-        if not allowed_projects:
-            raise HTTPException(status_code=403, detail="No valid projects assigned to user")
+        var desc = ws.Cells[row, 2].GetValue<string>()?.Trim() ?? "";
 
-        # Project selected by frontend
-        selected_project = request.projectid
-
-        if selected_project not in allowed_projects:
-            raise HTTPException(
-                status_code=403,
-                detail=f"You do not have access to project {selected_project}"
-            )
-
-        # ------------------------------------------------------
-        # 2. ITERATE THROUGH STAGED TEST CASES
-        # ------------------------------------------------------
-        commit_count = 0
-
-        for tc in request.testcases:
-            tc_id = tc.testcaseid
-
-            # ------------------------------------------------------
-            # 3. Prevent duplicate testcaseid
-            # ------------------------------------------------------
-            exists = await conn.fetchall(
-                "SELECT testcaseid FROM testcase WHERE testcaseid = ?",
-                (tc_id,)
-            )
-            if exists:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Testcase {tc_id} already exists"
-                )
-
-            # Normalize tags
-            tags = tc.tags or []
-            if isinstance(tags, str):
-                tags = [tags]
-
-            # ------------------------------------------------------
-            # 4. Insert into testcase table
-            # ------------------------------------------------------
-            await conn.execute(
-                """
-                INSERT INTO testcase 
-                (testcaseid, testdesc, pretestid, prereq, tag, projectid)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    tc_id,
-                    tc.testdesc or "",
-                    tc.pretestid or "",
-                    tc.prereq or "",
-                    json.dumps(tags),                       # SQLite store JSON
-                    json.dumps([selected_project])          # store project array
-                )
-            )
-
-            # ------------------------------------------------------
-            # 5. Extract steps correctly (frontend sends objects)
-            # ------------------------------------------------------
-            steps = tc.steps
-
-            step_texts = []
-            step_args = []
-
-            for s in steps:
-                step_texts.append(s.step or "")
-                step_args.append(s.steparg or "")
-
-            # ------------------------------------------------------
-            # 6. Insert into teststep (SQLite JSON strings)
-            # ------------------------------------------------------
-            await conn.execute(
-                """
-                INSERT INTO teststep (testcaseid, steps, args, stepnum)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    tc_id,
-                    json.dumps(step_texts),
-                    json.dumps(step_args),
-                    len(step_texts)
-                )
-            )
-
-            commit_count += 1
-
-        await conn.commit()
-
-        # ------------------------------------------------------
-        # 7. Return Response
-        # ------------------------------------------------------
-        return {
-            "message": f"Upload committed successfully ({commit_count} test cases)",
-            "testcases_committed": commit_count
+        // ---------------------------------------------------
+        // ⭐ RULE ADDED: Test Case Description must not be empty
+        // ---------------------------------------------------
+        if (!string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(desc))
+        {
+            throw new Exception($"Test Case Description cannot be empty for TestCaseId '{id}' at row {row}.");
         }
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Commit failed: {str(e)}")
-    finally:
-        if conn:
-            await conn.close()
+        // Column mapping per Option A:
+        // col 6 -> StepNo
+        // col 7 -> Step
+        // col 8 -> Argument
+        var stepNoCell = ws.Cells[row, 6].GetValue<string>()?.Trim();
+        var stepText = ws.Cells[row, 7].GetValue<string>()?.Trim();
+        var argText = ws.Cells[row, 8].GetValue<string>()?.Trim();
 
+        if (current == null || current.TestCaseId != id)
+        {
+            if (current != null)
+                result.Add(current);
 
-
-
-
-
-
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
-
-
-# ------------------------------------------------------
-# Normalized Step (No changes as requested)
-# ------------------------------------------------------
-class NormalizedStep(BaseModel):
-    """
-    One normalized step as returned by Gemini and posted back.
-    """
-    Index: Optional[int] = None
-    Step: str
-    TestDataText: Optional[str] = None
-    TestData: Optional[Dict[str, Any]] = None
-
-
-class NormalizedStepsUpdate(BaseModel):
-    """
-    Request body for /replace-normalized/{testcase_id}.
-    """
-    normalized_steps: List[NormalizedStep]
-
-
-# ------------------------------------------------------
-# MODELS FOR /commit-staged-upload  (SQLite Compatible)
-# ------------------------------------------------------
-
-class CommitStep(BaseModel):
-    """
-    One step inside the commit-staged-upload structure.
-    Sent from frontend after normalization.
-    """
-    step: str
-    steparg: Optional[str] = ""
-    stepno: Optional[int] = None
-
-
-class CommitTestCase(BaseModel):
-    """
-    A single staged test case to commit.
-    """
-    testcaseid: str
-    testdesc: Optional[str] = ""
-    pretestid: Optional[str] = ""
-    prereq: Optional[str] = ""
-    tags: Optional[List[str]] = []
-    steps: List[CommitStep]
-
-
-class CommitUploadData(BaseModel):
-    """
-    Request body for /commit-staged-upload.
-    User selects a single project and sends staged testcases.
-    """
-    projectid: str
-    testcases: List[CommitTestCase]
-
-
-class CommitUploadResponse(BaseModel):
-    """
-    Response for /commit-staged-upload.
-    """
-    message: str
-    testcases_committed: int
-
-
-
-
-
------------------------------------------
-@router.post("/commit-staged-upload", response_model=models.CommitUploadResponse,
-             summary="Commit staged test cases to database (SQLite version)")
-async def commit_staged_upload(
-        request: models.CommitUploadData,
-        current_user: dict = Depends(get_current_any_user)
-):
-    """Commit staged test cases into SQLite."""
-    conn = None
-    try:
-        conn = await db.get_db_connection()
-        userid = current_user["userid"]
-
-        # Validate user project access
-        user_proj_row = await conn.execute_fetchone(
-            "SELECT projectid FROM projectuser WHERE userid = ?", (userid,)
-        )
-        if not user_proj_row:
-            raise HTTPException(status_code=403, detail="User not assigned to any project")
-
-        allowed_projects_raw = user_proj_row[0]
-
-        if isinstance(allowed_projects_raw, str):
-            allowed_projects = {allowed_projects_raw}
-        else:
-            allowed_projects = set(allowed_projects_raw)
-
-        selected_project = request.projectid
-        if selected_project not in allowed_projects:
-            raise HTTPException(
-                status_code=403,
-                detail=f"You do not have access to project {selected_project}"
-            )
-
-        commit_count = 0
-
-        for tc in request.testcases:
-            tc_id = tc.get("testcaseid")
-
-            if not tc_id:
-                continue
-
-            # Check duplicate test case
-            existing = await conn.execute_fetchone(
-                "SELECT testcaseid FROM testcase WHERE testcaseid = ?",
-                (tc_id,)
-            )
-            if existing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Test case {tc_id} already exists"
-                )
-
-            # Normalize tags
-            tags = tc.get("tags", [])
-            if isinstance(tags, str):
-                tags = [tags]
-
-            # Store testcase
-            await conn.execute(
-                """
-                INSERT INTO testcase 
-                (testcaseid, testdesc, pretestid, prereq, tag, projectid)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    tc_id,
-                    tc.get("testdesc", ""),
-                    tc.get("pretestid") or None,
-                    tc.get("prereq") or "",
-                    json.dumps(tags),                       # stored as JSON
-                    json.dumps([selected_project])          # project array stored as JSON
-                )
-            )
-
-            # Extract steps from payload
-            steps_data = tc.get("steps", [])
-
-            step_texts = []
-            step_args = []
-
-            for s in steps_data:
-                step_texts.append(s.get("step", "") or "")
-                step_args.append(s.get("steparg", "") or "")
-
-            # Insert into teststep table
-            await conn.execute(
-                """
-                INSERT INTO teststep (testcaseid, steps, args, stepnum)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    tc_id,
-                    json.dumps(step_texts),       # SQLite stores arrays as JSON
-                    json.dumps(step_args),
-                    len(step_texts)
-                )
-            )
-
-            commit_count += 1
-
-        await conn.commit()
-
-        return {
-            "message": f"Upload committed successfully ({commit_count} test cases)",
-            "testcases_committed": commit_count
+            current = new GroupedTestCase
+            {
+                TestCaseId = id,
+                Description = desc,
+                PreReqId = ws.Cells[row, 3].GetValue<string>() ?? "",
+                PreReqDesc = ws.Cells[row, 4].GetValue<string>() ?? "",
+                Tags = (ws.Cells[row, 5].GetValue<string>() ?? "")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(t => t.Trim()).ToList(),
+                Steps = new List<TestStep>()
+            };
         }
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Commit failed: {str(e)}")
-    finally:
-        if conn:
-            await conn.close()
+        // If row contains step data, StepNo must be valid
+        if (!string.IsNullOrWhiteSpace(stepText) || !string.IsNullOrWhiteSpace(argText))
+        {
+            if (string.IsNullOrWhiteSpace(stepNoCell))
+                throw new Exception($"Missing StepNo at row {row}. Please provide StepNo in column 6.");
 
+            if (!int.TryParse(stepNoCell, out int stepNo))
+                throw new Exception($"Invalid StepNo '{stepNoCell}' at row {row}. StepNo must be a number.");
 
+            current.Steps.Add(new TestStep
+            {
+                StepNo = stepNo,
+                Step = stepText ?? "",
+                Argument = argText ?? ""
+            });
+        }
+    }
 
+    if (current != null)
+        result.Add(current);
 
-
-
-
-------------------------------
-
-public async Task<HttpResponseMessage> PostAsync(string url, HttpContent content)
-{
-    var response = await _client.PostAsync(url, content);
-
-    // If success → return normally
-    if (response.IsSuccessStatusCode)
-        return response;
-
-    // Else → extract and throw actual message
-    var errorText = await response.Content.ReadAsStringAsync();
-
-    throw new Exception(
-        $"API Error {response.StatusCode}: {errorText}"
-    );
+    return result;
 }
 
-
-
-
-public async Task<HttpResponseMessage> GetAsync(string url)
+public class GroupedTestCase
 {
-    var response = await _client.GetAsync(url);
-
-    if (response.IsSuccessStatusCode)
-        return response;
-
-    var errorText = await response.Content.ReadAsStringAsync();
-
-    throw new Exception(
-        $"API Error {response.StatusCode}: {errorText}"
-    );
+    public string TestCaseId { get; set; } = "";
+    public string Description { get; set; } = "";
+    public string PreReqId { get; set; } = "";
+    public string PreReqDesc { get; set; } = "";
+    public List<string> Tags { get; set; } = new();
+    public List<TestStep> Steps { get; set; } = new();
 }
-
-
-        
+#endregion
