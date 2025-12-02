@@ -1,32 +1,32 @@
-// ---- FIX: robust parsing for "normalized" field ----
-List<Dictionary<string, object>> normalizedSteps = null;
-var normalizedRaw = item["normalized"];
+total_steps = len([log for log in logger.logs if log.code and log.code.startswith("STEP_")])
+    passed_steps = len([log for log in logger.logs if log.code and log.code.startswith("STEP_") and log.level == LogLevel.SUCCESS.value])
+    failed_steps = total_steps - passed_steps
 
-// Case 1 → already correct type
-if (normalizedRaw is List<Dictionary<string, object>> directList)
-{
-    normalizedSteps = directList;
-}
-// Case 2 → List<object>
-else if (normalizedRaw is List<object> objList)
-{
-    normalizedSteps = objList
-        .Select(o =>
-            JsonSerializer.Deserialize<Dictionary<string, object>>(
-                JsonSerializer.Serialize(o)
-            )
-        ).ToList();
-}
-// Case 3 → JsonElement array (MOST COMMON)
-else if (normalizedRaw is JsonElement elem && elem.ValueKind == JsonValueKind.Array)
-{
-    normalizedSteps = elem.EnumerateArray()
-        .Select(x =>
-            JsonSerializer.Deserialize<Dictionary<string, object>>(x.GetRawText())
-        ).ToList();
-}
-// Case 4 → give up
-else
-{
-    throw new Exception("Invalid normalized steps (unexpected format)");
-}
+    summary_lines = [
+        "",
+        "Test Steps Summary",
+        "──────────────────",
+        f"Total Steps   : {total_steps}",
+        f"Passed        : {passed_steps}",
+        f"Failed        : {failed_steps}",
+    ]
+
+    if failed_steps > 0:
+        for log in reversed(logger.logs):
+            if log.code and log.code.startswith("STEP_") and log.level == LogLevel.ERROR.value:
+                step_num = log.code.replace("STEP_", "")
+                summary_lines.append(f"Failed at     : Step {step_num} – \"{log.message}\"")
+                if log.details and "error" in log.details:
+                    err = str(log.details["error"])[:120]
+                    summary_lines.append(f"Error         : {err}{'...' if len(err) >= 120 else ''}")
+                break
+        overall = "FAILED"
+    else:
+        overall = "SUCCESS"
+
+    summary_lines.append(f"Overall Status: {overall}")
+
+    await websocket.send_text(json.dumps({
+        "status": "SUMMARY",                     # ← frontend already accepts any string here
+        "log": "\n".join(summary_lines)
+    }))
