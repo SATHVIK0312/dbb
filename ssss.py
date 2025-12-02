@@ -1,122 +1,84 @@
-private List<GroupedTestCase> ParseExcelWithGrouping(string path)
-{
-    var result = new List<GroupedTestCase>();
-    GroupedTestCase current = null;
+@app.get("/projects/{project_id}/executions/history")
+async def get_execution_history(
+    project_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_any_user)
+):
+    """
+    Get paginated execution history for a project
+    Fully compatible with your current SQLite + JSON projectid setup
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        userid = current_user["userid"]
 
-    using var package = new ExcelPackage(new FileInfo(path));
-    var ws = package.Workbook.Worksheets[0];
+        # 1. Verify user has access to this project
+        user_row = await (await conn.execute(
+            "SELECT projectid FROM projectuser WHERE userid = ?",
+            (userid,)
+        )).fetchone()
 
-    // Validate header: StepNo must be at column 6
-    var headerStepNo = ws.Cells[1, 6].GetValue<string>()?.Trim();
-    if (string.IsNullOrWhiteSpace(headerStepNo) ||
-        !headerStepNo.Equals("StepNo", StringComparison.OrdinalIgnoreCase))
-        throw new Exception("Excel must contain 'StepNo' column at column 6 (before Step).");
+        if not user_row or project_id not in from_json(user_row["projectid"]):
+            raise HTTPException(status_code=403, detail="You are not assigned to this project")
 
-    for (int row = 2; row <= ws.Dimension.End.Row; row++)
-    {
-        var rawId = ws.Cells[row, 1].GetValue<string>()?.Trim();
-        string id = string.IsNullOrWhiteSpace(rawId) ? current?.TestCaseId : rawId;
+        # 2. Get all test cases in this project (projectid stored as JSON array string)
+        tc_rows = await (await conn.execute(
+            "SELECT testcaseid FROM testcase WHERE projectid LIKE ?",
+            (f'%{project_id}%',)
+        )).fetchall()
 
-        var desc = ws.Cells[row, 2].GetValue<string>()?.Trim() ?? "";
-        var preReqId = ws.Cells[row, 3].GetValue<string>()?.Trim();
-        var preReqDesc = ws.Cells[row, 4].GetValue<string>()?.Trim();
-        var tagsRaw = ws.Cells[row, 5].GetValue<string>()?.Trim() ?? "";
-        var stepNoCell = ws.Cells[row, 6].GetValue<string>()?.Trim();
-        var stepText = ws.Cells[row, 7].GetValue<string>()?.Trim();
-        var argText = ws.Cells[row, 8].GetValue<string>()?.Trim();
+        if not tc_rows:
+            return {"total": 0, "executions": []}
 
-        bool hasId = !string.IsNullOrWhiteSpace(rawId);
-        bool hasStepNo = !string.IsNullOrWhiteSpace(stepNoCell);
-        bool hasStepDesc = !string.IsNullOrWhiteSpace(stepText);
+        testcase_ids = [row["testcaseid"] for row in tc_rows]
 
-        // ---------------------------------------------------------
-        // RULE 1 — Valid Scenario Start
-        // ---------------------------------------------------------
-        if (hasId)
-        {
-            if (string.IsNullOrWhiteSpace(desc))
-                throw new Exception($"Row {row}: Scenario Name cannot be empty when Scenario ID is present.");
+        # 3. Get total count
+        placeholders = ",".join("?" for _ in testcase_ids)
+        count_query = f"SELECT COUNT(*) as total FROM execution WHERE testcaseid IN ({placeholders})"
+        count_row = await (await conn.execute(count_query, testcase_ids)).fetchone()
+        total = count_row["total"] if count_row else 0
 
-            if (!hasStepNo || stepNoCell != "1")
-                throw new Exception($"Row {row}: Scenario start must have StepNo = 1.");
+        # 4. Get paginated executions
+        if not testcase_ids:
+            return {"total": 0, "executions": []}
 
-            // Prerequisite consistency applies here (Rule 4)
-            if (!string.IsNullOrWhiteSpace(preReqId) && string.IsNullOrWhiteSpace(preReqDesc))
-                throw new Exception($"Row {row}: Prerequisite ID is filled but Description is missing.");
+        limit = max(1, min(limit, 100))  # safety
+        offset = max(0, offset)
 
-            if (!string.IsNullOrWhiteSpace(preReqDesc) && string.IsNullOrWhiteSpace(preReqId))
-                throw new Exception($"Row {row}: Prerequisite Description is filled but Prerequisite ID is missing.");
+        exec_query = f"""
+            SELECT exeid, testcaseid, scripttype, datestamp, exetime, status, message, output
+            FROM execution
+            WHERE testcaseid IN ({placeholders})
+            ORDER BY datestamp DESC, exetime DESC
+            LIMIT ? OFFSET ?
+        """
+        exec_rows = await (await conn.execute(exec_query, testcase_ids + [limit, offset])).fetchall()
 
-            // Start a new scenario
-            if (current != null)
-                result.Add(current);
+        executions = []
+        for row in exec_rows:
+            executions.append({
+                "exeid": row["exeid"],
+                "testcaseid": row["testcaseid"],
+                "scripttype": row["scripttype"] or "unknown",
+                "datestamp": str(row["datestamp"]) if row["datestamp"] else "",
+                "exetime": str(row["exetime"]) if row["exetime"] else "",
+                "status": row["status"] or "UNKNOWN",
+                "message": row["message"] or "",
+                "output": row["output"] or ""
+            })
 
-            current = new GroupedTestCase
-            {
-                TestCaseId = id,
-                Description = desc,
-                PreReqId = preReqId ?? "",
-                PreReqDesc = preReqDesc ?? "",
-                Tags = tagsRaw.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                              .Select(t => t.Trim()).ToList(),
-                Steps = new List<TestStep>()
-            };
-        }
-        else
-        {
-            // ---------------------------------------------------------
-            // RULE 2 — Continuation row format
-            // ---------------------------------------------------------
-            if (current == null)
-                continue; // skip blank rows before first scenario
-
-            if (!hasStepNo)
-                throw new Exception($"Row {row}: StepNo must be present for continuation rows.");
-
-            if (!int.TryParse(stepNoCell, out int parsedStep))
-                throw new Exception($"Row {row}: Invalid StepNo '{stepNoCell}'.");
-
-            if (parsedStep <= 1)
-                throw new Exception($"Row {row}: Continuation rows must have StepNo > 1.");
-
-            if (!hasStepDesc)
-                throw new Exception($"Row {row}: Step description is required for continuation rows.");
+        return {
+            "total": total,
+            "executions": executions
         }
 
-        // ---------------------------------------------------------
-        // RULE 3 — Required Step Description
-        // ---------------------------------------------------------
-        if (hasStepNo && !hasStepDesc)
-            throw new Exception($"Row {row}: StepNo is provided but Step description is missing.");
-
-        // ---------------------------------------------------------
-        // RULE 4 — Prerequisite consistency only allowed on Step 1
-        // ---------------------------------------------------------
-        if (hasStepNo && stepNoCell != "1")
-        {
-            if (!string.IsNullOrWhiteSpace(preReqId) || !string.IsNullOrWhiteSpace(preReqDesc))
-                throw new Exception($"Row {row}: Prerequisite fields allowed only on StepNo = 1.");
-        }
-
-        // ---------------------------------------------------------
-        // Add step to scenario
-        // ---------------------------------------------------------
-        if (hasStepNo)
-        {
-            if (!int.TryParse(stepNoCell, out int stepNo))
-                throw new Exception($"Row {row}: StepNo must be numeric.");
-
-            current.Steps.Add(new TestStep
-            {
-                StepNo = stepNo,
-                Step = stepText ?? "",
-                Argument = argText ?? ""
-            });
-        }
-    }
-
-    if (current != null)
-        result.Add(current);
-
-    return result;
-}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] get_execution_history: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching execution history: {str(e)}")
+    finally:
+        if conn:
+            await conn.close()
