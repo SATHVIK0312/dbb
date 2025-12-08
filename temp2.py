@@ -22,10 +22,12 @@ from reportlab.lib import colors
 
 
 
+
+
 @router.get("/execution/{execution_id}/pdf")
 async def get_execution_pdf(
-        execution_id: str,
-        current_user: dict = Depends(get_current_any_user)
+    execution_id: str,
+    current_user: dict = Depends(get_current_any_user)
 ):
     """
     Generate and download PDF for a specific execution record
@@ -37,6 +39,12 @@ async def get_execution_pdf(
         conn = await db.get_db_connection()
         userid = current_user["userid"]
 
+        if isinstance(execution_id, (list, tuple)):
+            execution_id = execution_id[0] if execution_id else None
+        
+        if not execution_id:
+            raise HTTPException(status_code=400, detail="Invalid execution ID")
+
         # Fetch execution record
         execution = await conn.fetchrow(
             """
@@ -44,7 +52,7 @@ async def get_execution_pdf(
             FROM execution
             WHERE exeid = $1
             """,
-            execution_id
+            str(execution_id).strip()
         )
 
         if not execution:
@@ -55,12 +63,12 @@ async def get_execution_pdf(
             "SELECT projectid FROM testcase WHERE testcaseid = $1",
             execution["testcaseid"]
         )
-
+        
         if not testcase:
             raise HTTPException(status_code=404, detail="Test case not found")
 
         access = await conn.fetchrow(
-            "SELECT 1 FROM projectuser WHERE userid = $1 AND projectid && $2",
+            "SELECT 1 FROM projectuser WHERE userid = $1 AND projectid = $2",
             userid,
             testcase["projectid"]
         )
@@ -78,10 +86,10 @@ async def get_execution_pdf(
         doc = SimpleDocTemplate(
             temp_pdf_path,
             pagesize=letter,
-            rightMargin=0.5 * inch,
-            leftMargin=0.5 * inch,
-            topMargin=0.75 * inch,
-            bottomMargin=0.75 * inch
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
         )
 
         # Styles
@@ -123,11 +131,11 @@ async def get_execution_pdf(
 
         # Title
         content.append(Paragraph("Test Execution Report", title_style))
-        content.append(Spacer(1, 0.2 * inch))
+        content.append(Spacer(1, 0.2*inch))
 
         # Execution Summary Section
         content.append(Paragraph("Execution Summary", heading_style))
-
+        
         summary_data = [
             [
                 Paragraph("<b>Execution ID:</b>", label_style),
@@ -162,7 +170,7 @@ async def get_execution_pdf(
             ]
         ]
 
-        summary_table = Table(summary_data, colWidths=[2.5 * inch, 3.5 * inch])
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 3.5*inch])
         summary_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (1, -1), colors.HexColor('#f3f4f6')),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
@@ -175,22 +183,22 @@ async def get_execution_pdf(
             ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb'))
         ]))
         content.append(summary_table)
-        content.append(Spacer(1, 0.3 * inch))
+        content.append(Spacer(1, 0.3*inch))
 
         # Execution Message Section
         content.append(Paragraph("Execution Message", heading_style))
         message_text = execution["message"] or "No message provided"
         content.append(Paragraph(message_text, value_style))
-        content.append(Spacer(1, 0.3 * inch))
+        content.append(Spacer(1, 0.3*inch))
 
         # Execution Output Section
         content.append(Paragraph("Execution Output", heading_style))
-
+        
         output_text = execution["output"] or "No output captured"
         # Limit output length to prevent huge PDFs
         if len(output_text) > 5000:
             output_text = output_text[:5000] + "\n\n... (output truncated for PDF) ..."
-
+        
         # Create scrollable output box
         output_lines = output_text.split('\n')
         for line in output_lines[:200]:  # Limit to 200 lines
@@ -221,4 +229,6 @@ async def get_execution_pdf(
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
     finally:
         if conn:
-            await conn.close()
+            await db.release_db_connection(conn) # Use release_db_connection
+        if temp_pdf_path and os.path.exists(temp_pdf_path):
+            os.unlink(temp_pdf_path)
