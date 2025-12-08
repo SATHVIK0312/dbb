@@ -47,7 +47,7 @@ async def get_execution_pdf(
             raise HTTPException(status_code=400, detail="Invalid execution ID")
 
         # Fetch execution record
-        execution = await conn.fetchrow(
+        execution = await conn.execute_fetchall(
             """
             SELECT exeid, testcaseid, scripttype, datestamp, exetime, message, output, status
             FROM execution
@@ -60,7 +60,7 @@ async def get_execution_pdf(
             raise HTTPException(status_code=404, detail="Execution record not found")
 
         # Verify user access to this execution's test case
-        testcase = await conn.fetchrow(
+        testcase = await conn.execute_fetchall(
             "SELECT projectid FROM testcase WHERE testcaseid = $1",
             execution["testcaseid"]
         )
@@ -68,7 +68,7 @@ async def get_execution_pdf(
         if not testcase:
             raise HTTPException(status_code=404, detail="Test case not found")
 
-        access = await conn.fetchrow(
+        access = await conn.execute_fetchall(
             "SELECT 1 FROM projectuser WHERE userid = $1 AND projectid = $2",
             userid,
             testcase["projectid"]
@@ -77,7 +77,7 @@ async def get_execution_pdf(
             raise HTTPException(status_code=403, detail="You are not authorized to view this execution")
 
         # Get test case details
-        test_case = await conn.fetchrow(
+        test_case = await conn.execute_fetchall(
             "SELECT testdesc FROM testcase WHERE testcaseid = $1",
             execution["testcaseid"]
         )
