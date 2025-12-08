@@ -1,24 +1,4 @@
-def _get_status_color(status: str) -> str:
-    """Helper method to get color based on execution status"""
-    colors_map = {
-        "SUCCESS": "#10b981",
-        "COMPLETED": "#3b82f6",
-        "FAILED": "#ef4444",
-        "ERROR": "#f97316"
-    }
-    return colors_map.get(status, "#6b7280")
 
-
-
-
-
-import tempfile
-import utils
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
 
 
 
