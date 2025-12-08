@@ -25,7 +25,7 @@ from reportlab.lib import colors
 
 
 
-@router.get("/execution/{execution_id}/pdf")
+@app.get("/execution/{execution_id}/pdf")
 async def get_execution_pdf(
     execution_id: str,
     current_user: dict = Depends(get_current_any_user)
