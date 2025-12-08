@@ -1,3 +1,12 @@
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+
+
+
+
 @router.get("/execution/{execution_id}/pdf")
 async def get_execution_pdf(
         execution_id: str,
