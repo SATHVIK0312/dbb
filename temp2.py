@@ -12,7 +12,8 @@ def _get_status_color(status: str) -> str:
 
 
 
-
+import tempfile
+import utils
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
