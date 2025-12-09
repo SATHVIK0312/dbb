@@ -1,7 +1,6 @@
 import os
-import re
 import tempfile
-from pathlib import Path
+import re  # ← ONLY NEW IMPORT
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse
 from reportlab.lib.pagesizes import letter
@@ -11,45 +10,15 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 import utils
 
-
+# STATUS COLOR HELPER
 def _get_status_color(status: str) -> str:
     colors_map = {
-        "SUCCESS": "#10b981", "PASSED": "#10b981",
+        "SUCCESS": "#10b981",
         "COMPLETED": "#3b82f6",
-        "FAILED": "#ef4444", "ERROR": "#f97316",
-        "SKIPPED": "#8b5cf6"
+        "FAILED": "#ef4444",
+        "ERROR": "#f97316"
     }
-    return colors_map.get(status.upper().strip(), "#6b7280")
-
-
-# Smart path extractor from message text
-def extract_script_path_from_message(message: str) -> str:
-    if not message:
-        return None
-
-    text = str(message)
-
-    # Common patterns
-    patterns = [
-        r'Stored at:\s*([A-Za-z]:\\.+?\.py)',           # "Stored at: I:\path\to\file.py"
-        r'Script path:\s*([A-Za-z]:\\.+?\.[\w]+)',     # "Script path: C:\..."
-        r'path[:\s]+([A-Za-z]:\\.+?\.[\w]+)',          # flexible
-        r'executed.*?\.py\s*at[:\s]*([A-Za-z]:\\.+?\.py)',
-        r'([A-Za-z]:\\[^\s"\'<>|]+\.(py|js|sh|sql|java|xml|json|yaml|yml))',  # direct Windows path
-        r'(/[\w/\.-]+/(?:[\w\.-]+/)*[\w\.-]+\.(py|js||sh|sql|java|xml|json|yaml|yml))',  # Linux/macOS
-        r'[\'"` ]([A-Za-z]:\\[^\'"<>|]+\.(py|js|sh|sql))[\'"` ]',  # quoted paths
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            path = match.group(1).strip()
-            # Clean up any trailing punctuation
-            path = re.sub(r'[.,;:"\'\]>]+$', '', path).strip()
-            return path
-
-    return None
-
+    return colors_map.get(status, "#6b7280")
 
 @app.get("/execution/{execution_id}/pdf")
 async def get_execution_pdf(
@@ -61,201 +30,197 @@ async def get_execution_pdf(
     try:
         conn = await db.get_db_connection()
         userid = current_user["userid"]
-
-        if not execution_id or not execution_id.strip():
+        if not execution_id:
             raise HTTPException(status_code=400, detail="Invalid execution ID")
 
-        # Fetch execution
-        executions = await conn.execute_fetchall(
+        execution = await conn.execute_fetchall(
             """
-            SELECT exeid, testcaseid, scripttype, datestamp, exetime, 
-                   message, output, status
-            FROM execution WHERE exeid = ?
+            SELECT exeid, testcaseid, scripttype, datestamp, exetime, message, output, status
+            FROM execution
+            WHERE exeid = ?
             """,
             (str(execution_id).strip(),)
         )
-        if not executions:
-            raise HTTPException(status_code=404, detail="Execution not found")
-        execution = executions[0]
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution record not found")
+        execution = execution[0]
 
-        # === Extract script path from message ===
-        raw_message = execution["message"] or ""
-        script_path = extract_script_path_from_message(raw_message)
-
-        # Also fetch test description
-        testcase_rows = await conn.execute_fetchall(
-            "SELECT testdesc, projectid FROM testcase WHERE testcaseid = ?",
+        # Project access check (kept from your original)
+        testcase = await conn.execute_fetchall(
+            "SELECT projectid FROM testcase WHERE testcaseid = ?",
             (execution["testcaseid"],)
         )
-        if not testcase_rows:
+        if not testcase:
             raise HTTPException(status_code=404, detail="Test case not found")
-        testcase = testcase_rows[0]
-        test_desc = testcase.get("testdesc") or "No description"
+        testcase = testcase[0]
 
-        # Project access check
         access = await conn.execute_fetchall(
             "SELECT 1 FROM projectuser WHERE userid = ? AND projectid = ?",
             (userid, testcase["projectid"])
         )
         if not access:
-            raise HTTPException(status_code=403, detail="Access denied")
+            raise HTTPException(status_code=403, detail="You are not authorized to view this execution")
 
-        # === Read actual script file if path was found ===
-        script_code = "No script path detected in execution message."
-        script_found = False
-        script_language = "text"
+        # EXTRACT SCRIPT PATH FROM message FIELD
+        message_text = execution["message"] or ""
+        script_path = None
+        # Look for pattern like: Stored at: I:\some\path\file.py
+        match = re.search(r'Stored at:\s*([A-Za-z]:\\[^\s"\'<>|]+)', message_text, re.IGNORECASE)
+        if match:
+            script_path = match.group(1).strip()
 
-        if script_path:
-            # Normalize path
-            script_path = os.path.normpath(script_path.strip())
+        # Read the actual script file if path found
+        script_code = "No script path found in message."
+        if script_path and os.path.isfile(script_path):
+            try:
+                with open(script_path, "r", encoding="utf-8") as f:
+                    script_code = f.read()
+                if len(script_code) > 10000:
+                    script_code = script_code[:10000] + "\n\n... [CODE TRUNCATED] ..."
+            except:
+                script_code = "Failed to read script file from path."
+        elif script_path:
+            script_code = f"Script file not found on server:\n{script_path}"
 
-            # Try common mappings (especially useful in Docker/container environments)
-            possible_paths = [
-                script_path,  # exact
-                script_path.replace("I:\\", "/app/scripts/").replace("\\", "/"),
-                script_path.replace("C:\\", "/app/scripts/").replace("\\", "/"),
-                script_path.replace("D:\\", "/scripts/").replace("\\", "/"),
-                re.sub(r"^[A-Z]:\\projects\\", "/app/scripts/", script_path, flags=re.IGNORECASE),
-                re.sub(r"^[A-Z]:\\automation\\", "/scripts/", script_path, flags=re.IGNORECASE),
-            ]
-
-            for path_candidate in possible_paths:
-                expanded = os.path.expanduser(path_candidate)
-                if os.path.isfile(expanded):
-                    try:
-                        with open(expanded, "r", encoding="utf-8", errors="ignore") as f:
-                            script_code = f.read()
-                        script_found = True
-                        ext = Path(expanded).suffix.lower()
-                        script_language = {
-                            ".py": "python", ".js": "javascript", ".sh": "bash",
-                            ".sql": "sql", ".java": "java", ".xml": "xml",
-                            ".json": "json", ".yml": "yaml", ".yaml": "yaml"
-                        }.get(ext, "text")
-                        script_path = expanded  # show real resolved path
-                        break
-                    except Exception as e:
-                        utils.logger.warning(f"Could not read {expanded}: {e}")
-
-            if not script_found:
-                script_code = f"Script file not found on server:\n{script_path}\n\nTried mapping to container paths but file missing."
-
-        # Truncate very long code
-        if len(script_code) > 25_000:
-            script_code = script_code[:25_000] + "\n\n--- [SOURCE CODE TRUNCATED] ---"
-
-        # === PDF Generation ===
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        temp_pdf_path = temp_file.name
-        temp_file.close()
-
-        doc = SimpleDocTemplate(temp_pdf_path, pagesize=letter,
-                                rightMargin=0.5*inch, leftMargin=0.5*inch,
-                                topMargin=0.75*inch, bottomMargin=0.75*inch)
-
+        # CREATE TEMP PDF FILE
+        temp_pdf_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+        doc = SimpleDocTemplate(
+            temp_pdf_path,
+            pagesize=letter,
+            rightMargin=0.5 * inch,
+            leftMargin=0.5 * inch,
+            topMargin=0.75 * inch,
+            bottomMargin=0.75 * inch
+        )
         styles = getSampleStyleSheet()
-
-        title_style = ParagraphStyle("Title", parent=styles["Heading1"],
-                                     fontSize=20, alignment=1, spaceAfter=30,
-                                     textColor=colors.HexColor("#1f2937"))
-
-        heading_style = ParagraphStyle("Heading", parent=styles["Heading2"],
-                                       fontSize=14, spaceBefore=16, spaceAfter=8,
-                                       textColor=colors.HexColor("#374151"))
-
-        label_style = ParagraphStyle("Label", fontName="Helvetica-Bold",
-                                     fontSize=10, textColor=colors.HexColor("#4b5563"))
-
-        value_style = ParagraphStyle("Value", fontSize=10,
-                                     textColor=colors.HexColor("#1f2937"))
-
-        code_style = ParagraphStyle("Code", fontName="Courier", fontSize=8,
-                                    leading=9.5, spaceAfter=2, leftIndent=10,
-                                    backColor=colors.HexColor("#f9fafb"),
-                                    borderColor=colors.HexColor("#e5e7eb"),
-                                    borderWidth=0.5, borderPadding=8)
-
+        title_style = ParagraphStyle(
+            "CustomTitle",
+            parent=styles["Heading1"],
+            fontSize=18,
+            textColor=colors.HexColor("#1f2937"),
+            alignment=1,
+            spaceAfter=12
+        )
+        heading_style = ParagraphStyle(
+            "Heading",
+            parent=styles["Heading2"],
+            fontSize=12,
+            textColor=colors.HexColor("#374151"),
+            spaceBefore=10,
+            spaceAfter=6
+        )
+        label_style = ParagraphStyle(
+            "Label",
+            parent=styles["Normal"],
+            fontSize=10,
+            textColor=colors.HexColor("#4b5563"),
+            fontName="Helvetica-Bold"
+        )
+        value_style = ParagraphStyle(
+            "Value",
+            parent=styles["Normal"],
+            fontSize=10,
+            textColor=colors.HexColor("#1f2937")
+        )
         content = []
 
-        # Title
+        # TITLE
         content.append(Paragraph("Test Execution Report", title_style))
-        content.append(Spacer(1, 0.3 * inch))
+        content.append(Spacer(1, 0.2 * inch))
 
-        # Summary
-        summary_data = [
-            ["Execution ID", str(execution["exeid"])],
-            ["Test Case ID", str(execution["testcaseid"])],
-            ["Description", test_desc],
-            ["Script Type", execution["scripttype"] or "Unknown"],
-            ["Date", str(execution["datestamp"])],
-            ["Time", str(execution["exetime"])],
-            ["Status", f"<font color='{_get_status_color(execution['status'])}'><b>{execution['status']}</b></font>"],
-        ]
-        table = Table(summary_data, colWidths=[2.5*inch, 4.5*inch])
-        table.setStyle(TableStyle([
-            ("GRID", (0,0), (-1,-1), 1, colors.lightgrey),
-            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f3f4f6")),
-            ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
-            ("LEFTPADDING", (0,0), (-1,-1), 8),
-            ("TOPPADDING", (0,0), (-1,-1), 8),
-        ]))
+        # EXECUTION SUMMARY (your original)
         content.append(Paragraph("Execution Summary", heading_style))
-        content.append(table)
-        content.append(Spacer(1, 0.4 * inch))
-
-        # Message
-        clean_message = raw_message.split("Stored at:")[-1].split("path:")[-1] if "Stored at:" in raw_message or "path:" in raw_message else raw_message
-        content.append(Paragraph("Execution Message", heading_style))
-        content.append(Paragraph(clean_message.replace("\n", "<br/>"), value_style))
+        summary_data = [
+            [Paragraph("Execution ID", label_style), Paragraph(str(execution["exeid"]), value_style)],
+            [Paragraph("Test Case ID", label_style), Paragraph(str(execution["testcaseid"]), value_style)],
+            [Paragraph("Script Type", label_style), Paragraph(str(execution["scripttype"]), value_style)],
+            [Paragraph("Execution Date", label_style), Paragraph(str(execution["datestamp"]), value_style)],
+            [Paragraph("Execution Time", label_style), Paragraph(str(execution["exetime"]), value_style)],
+            [
+                Paragraph("Status", label_style),
+                Paragraph(
+                    f"<font color='{_get_status_color(execution['status'])}'><b>{execution['status']}</b></font>",
+                    value_style,
+                ),
+            ],
+        ]
+        summary_table = Table(summary_data, colWidths=[2.5 * inch, 3.5 * inch])
+        summary_table.setStyle(
+            TableStyle([
+                ("GRID", (0, 0), (-1, -1), 1, colors.lightgrey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ])
+        )
+        content.append(summary_table)
         content.append(Spacer(1, 0.3 * inch))
 
-        # Output
-        content.append(Paragraph("Console Output", heading_style))
-        output = execution["output"] or "No output"
-        if len(output) > 10_000:
-            output = output[:10_000] + "\n\n... [TRUNCATED]"
-        for i, line in enumerate(output.splitlines()):
-            if i > 350:
-                content.append(Paragraph("... [MORE OUTPUT TRUNCATED]", code_style))
-                break
-            line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            content.append(Paragraph(line or "&nbsp;", code_style))
+        # EXECUTION MESSAGE (your original)
+        content.append(Paragraph("Execution Message", heading_style))
+        message = execution["message"] or "No message available"
+        content.append(Paragraph(message, value_style))
+        content.append(Spacer(1, 0.3 * inch))
+
+        # EXECUTION OUTPUT (your original)
+        content.append(Paragraph("Execution Output", heading_style))
+        output_text = execution["output"] or "No output available"
+        if len(output_text) > 5000:
+            output_text = output_text[:5000] + "\n\n... Output Truncated ..."
+        for line in output_text.splitlines()[:200]:
+            content.append(
+                Paragraph(
+                    line if line.strip() else "&nbsp;",
+                    ParagraphStyle(
+                        "Output",
+                        parent=styles["Normal"],
+                        fontSize=8,
+                        fontName="Courier",
+                        textColor=colors.HexColor("#374151"),
+                        spaceAfter=2,
+                    ),
+                )
+            )
+
+        # NEW: SCRIPT SOURCE CODE SECTION (only addition)
         content.append(Spacer(1, 0.4 * inch))
-
-        # Source Code
-        content.append(Paragraph("Test Script Source Code", heading_style))
-        if script_found:
-            content.append(Paragraph(f"<i>Resolved path: {script_path}</i>", value_style))
-        else:
-            content.append(Paragraph(f"<i>Warning: Could not load script file</i>", value_style))
-        content.append(Spacer(1, 8))
-
-        line_count = 0
+        content.append(Paragraph("Script Source Code", heading_style))
         for line in script_code.splitlines():
-            if line_count >= 500:
-                content.append(Paragraph("--- [CODE TOO LONG - TRUNCATED] ---", code_style))
-                break
-            line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            content.append(Paragraph(line or "&nbsp;", code_style))
-            line_count += 1
+            safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if not safe_line.strip():
+                safe_line = "&nbsp;"
+            content.append(
+                Paragraph(
+                    safe_line,
+                    ParagraphStyle(
+                        "Code",
+                        parent=styles["Normal"],
+                        fontSize=8,
+                        fontName="Courier",
+                        textColor=colors.HexColor("#374151"),
+                        spaceAfter=2,
+                    ),
+                )
+            )
 
+        # BUILD PDF
         doc.build(content)
 
         return FileResponse(
             temp_pdf_path,
             media_type="application/pdf",
-            filename=f"execution_{execution_id}_report.pdf",
-            headers={"Content-Disposition": f"attachment; filename=execution_{execution_id}_report.pdf"}
+            filename=f"execution_{execution_id}.pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=execution_{execution_id}.pdf"
+            },
         )
-
     except HTTPException:
         raise
     except Exception as e:
-        utils.logger.error(f"PDF generation failed for {execution_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to generate PDF")
+        utils.logger.error(f"PDF generation failed for execution {execution_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
     finally:
         if conn:
             await db.release_db_connection(conn)
         if temp_pdf_path and os.path.exists(temp_pdf_path):
-            try: os.unlink(temp_pdf_path)
-            except: pass
+            os.unlink(temp_pdf_path)
