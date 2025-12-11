@@ -33,3 +33,40 @@ Feature: SauceDemo - Complete Purchase Flow as standard_user
     When User opens the burger menu
     And User clicks Logout
     Then User is redirected back to login page
+
+
+
+
+# features/06_ParaBank_Banking.feature
+Feature: ParaBank - Online Banking with Account Management
+
+  Scenario: TC_PARABANK_001 - User registers, logs in, transfers funds, and logs out
+    Given User navigates to ParaBank homepage "https://parabank.parasoft.com/parabank/index.htm"
+    When User clicks on Register link
+    And User enters First Name "John"
+    And User enters Last Name "Doe"
+    And User enters Address "123 Main St"
+    And User enters City "Springfield"
+    And User enters State "IL"
+    And User enters Zip Code "62701"
+    And User enters Phone "555-1234"
+    And User enters SSN "123-45-6789"
+    And User enters Username "johndoe"
+    And User enters Password "password123"
+    And User enters Confirm Password "password123"
+    And User clicks Register button
+    Then registration success message appears
+    When User clicks on Login link
+    And User enters Username "johndoe"
+    And User enters Password "password123"
+    And User clicks Login button
+    Then User is on Accounts Overview page
+    When User clicks on Transfer Funds link
+    And User enters Transfer From Account "12345"
+    And User enters Transfer To Account "67890"
+    And User enters Amount "100.00"
+    And User clicks Transfer button
+    Then transfer confirmation message appears
+    And balance is updated correctly
+    When User clicks on Logout link
+    Then User is redirected to homepage
