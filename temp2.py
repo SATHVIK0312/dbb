@@ -1,86 +1,42 @@
-import re
-
 async def execute_account_row_click(page, step_name: str):
-    """
-    Handles:
-    - first / second / third / nth account number
-    - Uses XPath with contains(text()) for legacy CCS DOM
-    """
 
-    # Resolve frames
+    # ⏸ Pause 10 seconds before doing anything
+    await page.wait_for_timeout(10_000)
+
+    # Re-resolve frame (MANDATORY after navigation)
     nav_frame, content_frame = resolve_ccs_frames(page)
+
+    # Wait until account list table is present
+    await content_frame.wait_for_selector(
+        "xpath=//table[.//text()[contains(.,'Customer Account List')]]",
+        timeout=20000
+    )
 
     step_lower = step_name.lower()
 
-    # -------------------------------
-    # STEP 1: Extract index from step
-    # -------------------------------
-    index_map = {
-        "first": 1,
-        "second": 2,
-        "third": 3,
-        "fourth": 4,
-        "fifth": 5
-    }
+    # Determine index
+    if "first" in step_lower:
+        index = 1
+    elif "second" in step_lower:
+        index = 2
+    elif "third" in step_lower:
+        index = 3
+    else:
+        raise RuntimeError("Specify first / second / third account")
 
-    index = None
-
-    for word, value in index_map.items():
-        if word in step_lower:
-            index = value
-            break
-
-    # Support numeric: 1st / 2nd / 3rd / 4th
-    if index is None:
-        m = re.search(r"(\d+)(st|nd|rd|th)", step_lower)
-        if m:
-            index = int(m.group(1))
-
-    if index is None:
-        raise RuntimeError(
-            "ACCOUNT_ROW_CLICK requires first / second / nth account"
-        )
-
-    # -----------------------------------------
-    # STEP 2: Build base XPath (NO INDEX YET)
-    # -----------------------------------------
-    base_xpath = (
-        "//table[.//text()[contains(.,'Customer Account List')]]"
-        "//a[contains(@href,'selectedAccountNumber')]"
+    # Build final XPath
+    xpath = (
+        f"(//table[.//text()[contains(.,'Customer Account List')]]"
+        f"//a[contains(@href,'selectedAccountNumber')])[{index}]"
     )
 
-    # -----------------------------------------
-    # STEP 3: Validate index exists
-    # -----------------------------------------
-    total_accounts = await content_frame.locator(
-        f"xpath={base_xpath}"
-    ).count()
-
-    if total_accounts == 0:
-        raise RuntimeError("No account numbers found in Customer Account List")
-
-    if index > total_accounts:
-        raise RuntimeError(
-            f"Only {total_accounts} accounts found, cannot click index {index}"
-        )
-
-    # -----------------------------------------
-    # STEP 4: Final XPath with index
-    # -----------------------------------------
-    final_xpath = f"({base_xpath})[{index}]"
-
-    # -----------------------------------------
-    # STEP 5: Click the account
-    # -----------------------------------------
-    account_link = content_frame.locator(f"xpath={final_xpath}")
+    account_link = content_frame.locator(f"xpath={xpath}")
 
     await account_link.wait_for(state="visible", timeout=15000)
     await account_link.scroll_into_view_if_needed()
     await account_link.click(timeout=10000)
 
-    # -----------------------------------------
-    # STEP 6: Wait for navigation
-    # -----------------------------------------
+    # Wait for Account Display page
     await content_frame.wait_for_selector(
         "div:has-text('Account Display')",
         timeout=20000
