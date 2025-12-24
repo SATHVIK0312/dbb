@@ -7,7 +7,7 @@ elif action_type == "RADIO":
     step_lower = step_name.lower()
 
     # -----------------------------------------
-    # Extract radio value (Y / N / any value)
+    # Extract radio value (Y / N)
     # -----------------------------------------
     if "value =" not in step_lower:
         raise RuntimeError("RADIO step missing 'value ='")
@@ -27,7 +27,7 @@ elif action_type == "RADIO":
     nav_frame, content_frame = resolve_ccs_frames(page)
 
     # -----------------------------------------
-    # Optional section resolution (generic)
+    # Optional section scoping
     # -----------------------------------------
     section = None
     if " in the " in step_lower:
@@ -42,37 +42,48 @@ elif action_type == "RADIO":
         section_root = content_frame.locator(
             f"div:has-text('{section.title()}')"
         )
-        radios = section_root.locator("input[type='radio']")
+        radio_candidates = section_root.locator("input[type='radio']")
     else:
-        radios = content_frame.locator("input[type='radio']")
+        radio_candidates = content_frame.locator("input[type='radio']")
 
-    count = await radios.count()
-    if count == 0:
+    total = await radio_candidates.count()
+    if total == 0:
         raise RuntimeError("No radio buttons found")
 
     selected = False
 
     # -----------------------------------------
-    # Match strictly by value attribute
+    # CLICK ONLY ACTIVE + VISIBLE RADIO
     # -----------------------------------------
-    for i in range(count):
-        radio = radios.nth(i)
+    for i in range(total):
+        radio = radio_candidates.nth(i)
+
+        # Skip hidden radios
+        if not await radio.is_visible():
+            continue
+
+        # Skip disabled radios
+        if await radio.is_disabled():
+            continue
+
         value_attr = (await radio.get_attribute("value") or "").lower()
 
         if value_attr == radio_value:
             await radio.scroll_into_view_if_needed()
+            await radio.wait_for(state="visible", timeout=5000)
             await radio.click(force=True)
             await content_frame.wait_for_timeout(300)
 
             logger.info(
                 LogCategory.EXECUTION,
-                f"[PHASE 3] RADIO selected successfully: value={radio_value} section={section}"
+                f"[PHASE 3] RADIO selected successfully: value={radio_value}, section={section}"
             )
+
             selected = True
             break
 
     if not selected:
         raise RuntimeError(
-            f"Radio button with value '{radio_value}' not found"
+            f"No ACTIVE radio button with value '{radio_value}' found"
         )
 
