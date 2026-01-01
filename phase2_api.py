@@ -109,27 +109,26 @@ def generate_gtc_id(index: int) -> str:
     return f"GTC{str(index).zfill(3)}"
 
 
-def extract_text(file_path: str, ext: str) -> str:
-    """Extract text from PDF, DOCX, XLSX"""
-    text = ""
+def extract_text(file: UploadFile) -> str:
+    content = file.file.read()
 
-    if ext == "pdf":
-        doc = fitz.open(file_path)
-        for page in doc:
-            text += page.get_text()
+    if file.filename.endswith(".pdf"):
+        doc = fitz.open(stream=content, filetype="pdf")
+        return "\n".join(p.get_text() for p in doc)
 
-    elif ext == "docx":
-        document = docx.Document(file_path)
-        for para in document.paragraphs:
-            text += para.text + "\n"
+    if file.filename.endswith(".docx"):
+        document = Document(io.BytesIO(content))
+        return "\n".join(p.text for p in document.paragraphs)
 
-    elif ext == "xlsx":
-        wb = openpyxl.load_workbook(file_path)
+    if file.filename.endswith(".xlsx"):
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        text = ""
         for sheet in wb:
             for row in sheet.iter_rows(values_only=True):
-                text += " ".join(str(cell) for cell in row if cell) + "\n"
+                text += " ".join(str(c) for c in row if c) + "\n"
+        return text
 
-    return text.strip()
+    raise HTTPException(status_code=400, detail="Unsupported file type")
 
 # =========================================================
 # AZURE OPENAI CLIENT & ANALYSIS
