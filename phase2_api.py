@@ -1,120 +1,96 @@
-<Page x:Class="JPMCGenAI_v1._0.KnowledgeCenterPage"
-      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Background="#FAF9F6"
-      Title="KnowledgeCenterPage">
+using Microsoft.Win32;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using jpmc_genai.Services;
 
-    <Grid Margin="25">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
+namespace JPMCGenAI_v1._0
+{
+    public partial class KnowledgeCenterPage : Page
+    {
+        private string _selectedFilePath;
+        private AnalyzeResult _lastAnalyzeResult;
 
-        <!-- HEADER -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock Text="Knowledge Center"
-                       FontSize="26"
-                       FontWeight="Bold"
-                       Foreground="#333"/>
+        public KnowledgeCenterPage()
+        {
+            InitializeComponent();
+        }
 
-            <TextBlock Text="Upload documents to extract user stories, test cases, and flows"
-                       FontSize="13"
-                       Foreground="#8C8575"/>
-        </StackPanel>
+        // ---------------- Browse ----------------
+        private void BrowseFile_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Documents|*.pdf;*.docx;*.xlsx"
+            };
 
-        <!-- UPLOAD SECTION -->
-        <Border Grid.Row="1"
-                Background="White"
-                CornerRadius="12"
-                Padding="16"
-                Margin="0,0,0,20"
-                BorderBrush="#E2E1DC"
-                BorderThickness="1">
+            if (dlg.ShowDialog() == true)
+            {
+                _selectedFilePath = dlg.FileName;
+                SelectedFileText.Text = dlg.SafeFileName;
+            }
+        }
 
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        // ---------------- Analyze ----------------
+        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_selectedFilePath))
+            {
+                MessageBox.Show("Please select a file first.");
+                return;
+            }
 
-                <TextBlock Text="📄"
-                           FontSize="18"
-                           Margin="0,0,10,0"/>
+            using var client = new ApiClient();
+            client.SetBearer(Session.Token);
 
-                <TextBlock x:Name="SelectedFileText"
-                           Text="No file selected"
-                           VerticalAlignment="Center"
-                           Foreground="#555"
-                           Width="280"/>
+            var response = await client.PostFileAsync(
+                "analyze-document",
+                _selectedFilePath
+            );
 
-                <Button Content="Browse"
-                        Width="90"
-                        Margin="10,0"
-                        Click="BrowseFile_Click"/>
+            var json = await response.Content.ReadAsStringAsync();
+            _lastAnalyzeResult = JsonSerializer.Deserialize<AnalyzeResult>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+            );
 
-                <Button Content="Analyze"
-                        Width="100"
-                        Background="#D4AF37"
-                        Foreground="White"
-                        FontWeight="SemiBold"
-                        Click="AnalyzeDocument_Click"/>
+            // Populate preview
+            UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories;
+            FlowList.ItemsSource = _lastAnalyzeResult.software_flow;
+            TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases;
+        }
 
-                <Button Content="Save"
-                        Width="80"
-                        Margin="10,0,0,0"
-                        Click="SaveDocument_Click"/>
-            </StackPanel>
-        </Border>
+        // ---------------- Save ----------------
+        private void SaveDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (_lastAnalyzeResult == null)
+            {
+                MessageBox.Show("Nothing to save. Analyze a document first.");
+                return;
+            }
 
-        <!-- PREVIEW TABS -->
-        <TabControl Grid.Row="2">
+            MessageBox.Show("✅ Document saved successfully", "Saved",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
-            <!-- USER STORIES -->
-            <TabItem Header="User Stories">
-                <ListBox x:Name="UserStoriesList"
-                         Margin="10">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border Padding="10"
-                                    Margin="0,0,0,10"
-                                    Background="White"
-                                    CornerRadius="8"
-                                    BorderBrush="#E2E1DC"
-                                    BorderThickness="1">
-                                <TextBlock Text="{Binding}"
-                                           TextWrapping="Wrap"/>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </TabItem>
+        // ---------------- UI MODELS ----------------
+        private class AnalyzeResult
+        {
+            public List<string> user_stories { get; set; }
+            public List<string> software_flow { get; set; }
+            public List<TestCasePreview> test_cases { get; set; }
+        }
 
-            <!-- TEST CASES -->
-            <TabItem Header="Test Cases">
-                <DataGrid x:Name="TestCasesGrid"
-                          AutoGenerateColumns="False"
-                          Margin="10">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="ID" Binding="{Binding TestCaseId}" Width="100"/>
-                        <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </TabItem>
+        private class TestCasePreview
+        {
+            public string test_case_id { get; set; }
+            public string test_case_description { get; set; }
 
-            <!-- SOFTWARE FLOW -->
-            <TabItem Header="Software Flow">
-                <ListBox x:Name="FlowList"
-                         Margin="10">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="➜ "
-                                           FontWeight="Bold"/>
-                                <TextBlock Text="{Binding}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </TabItem>
-
-        </TabControl>
-    </Grid>
-</Page>
+            public string TestCaseId => test_case_id;
+            public string Description => test_case_description;
+        }
+    }
+}
