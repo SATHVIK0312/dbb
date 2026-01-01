@@ -37,7 +37,26 @@ Base = declarative_base()
 # =========================================================
 # DATABASE MODELS
 # =========================================================
-class Document(Base):
+
+class TestCaseSchema(BaseModel):
+    test_case_id: str
+    description: str
+    pre_req_id: Optional[str]
+    pre_req_desc: Optional[str]
+    tags: Optional[str]
+    steps: Optional[str]
+    arguments: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentResponseSchema(BaseModel):
+    document_id: int
+    is_software_related: bool
+    reason: str
+    test_cases_generated: int
+
+class DocumentModel(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True)
@@ -45,9 +64,9 @@ class Document(Base):
     is_software_related = Column(Integer)
     reason = Column(Text)
 
-    user_stories = relationship("UserStory", back_populates="document")
-    flows = relationship("SoftwareFlow", back_populates="document")
-    test_cases = relationship("TestCase", back_populates="document")
+    user_stories = relationship("UserStoryModel", cascade="all, delete")
+    flows = relationship("SoftwareFlowModel", cascade="all, delete")
+    test_cases = relationship("TestCaseModel", cascade="all, delete")
 
 
 class UserStory(Base):
