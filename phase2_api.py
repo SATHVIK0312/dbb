@@ -214,25 +214,132 @@ def generate_gtc_id(conn: sqlite3.Connection) -> str:
 # =========================================================
 @app.post("/analyze-document")
 async def analyze_document(file: UploadFile = File(...)):
-    # 1. Get async DB connection
+    # -------------------------------------------------
+    # 1. Extract text from file
+    # -------------------------------------------------
+    text = extract_text(file)
+
+    # -------------------------------------------------
+    # 2. Call Azure OpenAI
+    # -------------------------------------------------
+    ai_result = analyze_with_ai(text)
+
+    # -------------------------------------------------
+    # 3. Open async DB connection
+    # -------------------------------------------------
     conn = await get_db_connection()
 
     try:
-        # 2. Use async cursor
         async with conn.cursor() as cur:
+            # -------------------------------------------------
+            # 4. Insert document row
+            # -------------------------------------------------
             await cur.execute(
-                "INSERT INTO documents (filename, is_software_related, reason) VALUES (?, ?, ?)",
-                (file.filename, 1, "sample reason")
+                """
+                INSERT INTO documents (filename, is_software_related, reason)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    file.filename,
+                    int(ai_result["is_software_related"]),
+                    ai_result["reason"]
+                )
             )
 
             document_id = cur.lastrowid
 
+            # -------------------------------------------------
+            # 5. If NOT software-related → stop here
+            # -------------------------------------------------
+            if not ai_result["is_software_related"]:
+                await conn.commit()
+                return {
+                    "document_id": document_id,
+                    "is_software_related": False,
+                    "reason": ai_result["reason"],
+                    "test_cases_generated": 0
+                }
+
+            # -------------------------------------------------
+            # 6. Insert user stories
+            # -------------------------------------------------
+            for story in ai_result.get("user_stories", []):
+                await cur.execute(
+                    """
+                    INSERT INTO user_stories (document_id, story)
+                    VALUES (?, ?)
+                    """,
+                    (document_id, story)
+                )
+
+            # -------------------------------------------------
+            # 7. Insert software flow steps
+            # -------------------------------------------------
+            for step in ai_result.get("software_flow", []):
+                await cur.execute(
+                    """
+                    INSERT INTO software_flows (document_id, step)
+                    VALUES (?, ?)
+                    """,
+                    (document_id, step)
+                )
+
+            # -------------------------------------------------
+            # 8. Insert test cases with GTC IDs
+            # -------------------------------------------------
+            test_case_count = 0
+
+            for tc in ai_result.get("test_cases", []):
+                # Fetch last GTC id
+                await cur.execute(
+                    """
+                    SELECT test_case_id
+                    FROM test_cases
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                )
+                row = await cur.fetchone()
+
+                if row is None:
+                    gtc_id = "GTC001"
+                else:
+                    last_num = int(row["test_case_id"].replace("GTC", ""))
+                    gtc_id = f"GTC{last_num + 1:03d}"
+
+                await cur.execute(
+                    """
+                    INSERT INTO test_cases
+                    (document_id, test_case_id, description,
+                     pre_req_id, pre_req_desc,
+                     tags, steps, arguments)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        document_id,
+                        gtc_id,
+                        tc["test_case_description"],
+                        "USER_INPUT",
+                        "USER_INPUT",
+                        ",".join(tc.get("tags", [])),
+                        "\n".join(tc.get("test_steps", [])),
+                        ",".join(tc.get("arguments", []))
+                    )
+                )
+
+                test_case_count += 1
+
+            # -------------------------------------------------
+            # 9. Commit everything
+            # -------------------------------------------------
             await conn.commit()
 
-        return {
-            "document_id": document_id,
-            "status": "saved"
-        }
+            return {
+                "document_id": document_id,
+                "is_software_related": True,
+                "reason": ai_result["reason"],
+                "test_cases_generated": test_case_count
+            }
 
     finally:
         await conn.close()
