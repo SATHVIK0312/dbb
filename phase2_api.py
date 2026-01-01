@@ -189,69 +189,60 @@ def generate_gtc_id(db: Session) -> str:
 # =========================================================
 # API ENDPOINT
 # =========================================================
-@app.post("/analyze-document")
+@app.post("/analyze-document", response_model=DocumentResponseSchema)
 async def analyze_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    ext = file.filename.split(".")[-1].lower()
-    if ext not in ["pdf", "docx", "xlsx"]:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
+    text = extract_text(file)
+    result = analyze_with_ai(text)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
-        tmp.write(await file.read())
-        temp_path = tmp.name
+    document = DocumentModel(
+        filename=file.filename,
+        is_software_related=int(result["is_software_related"]),
+        reason=result["reason"]
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
 
-    try:
-        extracted_text = extract_text(temp_path, ext)
-        if len(extracted_text) < 100:
-            raise HTTPException(status_code=400, detail="Document content too small")
-
-        result = analyze_with_ai(extracted_text)
-
-        document = Document(
-            filename=file.filename,
-            is_software_related=int(result["is_software_related"]),
-            reason=result["reason"]
+    if not result["is_software_related"]:
+        return DocumentResponseSchema(
+            document_id=document.id,
+            is_software_related=False,
+            reason=result["reason"],
+            test_cases_generated=0
         )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
 
-        if not result["is_software_related"]:
-            return {
-                "message": "Not software-related",
-                "reason": result["reason"]
-            }
+    for story in result["user_stories"]:
+        db.add(UserStoryModel(document_id=document.id, story=story))
 
-        for us in result["user_stories"]:
-            db.add(UserStory(document_id=document.id, story=us))
+    for step in result["software_flow"]:
+        db.add(SoftwareFlowModel(document_id=document.id, step=step))
 
-        for step in result["software_flow"]:
-            db.add(SoftwareFlow(document_id=document.id, step=step))
+    count = 0
+    for tc in result["test_cases"]:
+        tc_id = generate_gtc_id(db)
+        db.add(TestCaseModel(
+            document_id=document.id,
+            test_case_id=tc_id,
+            description=tc["test_case_description"],
+            pre_req_id="USER_INPUT",
+            pre_req_desc="USER_INPUT",
+            tags=",".join(tc.get("tags", [])),
+            steps="\n".join(tc.get("test_steps", [])),
+            arguments=",".join(tc.get("arguments", []))
+        ))
+        count += 1
 
-        for idx, tc in enumerate(result["test_cases"], start=1):
-            db.add(TestCase(
-                document_id=document.id,
-                test_case_id=generate_gtc_id(idx),
-                description=tc["test_case_description"],
-                pre_req_id=tc["pre_requisite_test_id"],
-                pre_req_desc=tc["pre_requisite_test_description"],
-                tags=",".join(tc["tags"]),
-                steps="\n".join(tc["test_steps"]),
-                arguments=",".join(tc["arguments"]) if tc["arguments"] else None
-            ))
+    db.commit()
 
-        db.commit()
-
-        return {
-            "message": "Document processed successfully",
-            "document_id": document.id,
-            "test_cases_generated": len(result["test_cases"])
-        }
-
-    finally:
-        os.remove(temp_path)
+    return DocumentResponseSchema(
+        document_id=document.id,
+        is_software_related=True,
+        reason=result["reason"],
+        test_cases_generated=count
+    )
 
 
 ==================================================================
