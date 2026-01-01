@@ -307,3 +307,50 @@ CREATE TABLE test_cases (
         ON DELETE CASCADE
 );
 
+
+
+===================================================================
+===================================================================
+
+class TestCaseSchema(BaseModel):
+    test_case_id: str
+    description: str
+    pre_req_id: Optional[str]
+    pre_req_desc: Optional[str]
+    tags: Optional[str]
+    steps: Optional[str]
+    arguments: Optional[str]
+
+    model_config = {
+        "from_attributes": True  # REQUIRED in Pydantic v2
+    }
+
+
+class UserStorySchema(BaseModel):
+    story: str
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class SoftwareFlowSchema(BaseModel):
+    step: str
+
+    model_config = {
+        "from_attributes": True
+    }
+
+class DocumentResponseSchema(BaseModel):
+    id: int
+    filename: str
+    is_software_related: int
+    reason: Optional[str]
+    user_stories: List[UserStorySchema] = []
+    flows: List[SoftwareFlowSchema] = []
+    test_cases: List[TestCaseSchema] = []
+
+    model_config = {
+        "from_attributes": True
+    }
+
