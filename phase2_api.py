@@ -101,12 +101,7 @@ def get_db():
     finally:
         db.close()
 
-# =========================================================
-# HELPER FUNCTIONS
-# =========================================================
-def generate_gtc_id(index: int) -> str:
-    """Generate sequential GTC IDs"""
-    return f"GTC{str(index).zfill(3)}"
+
 
 
 def extract_text(file: UploadFile) -> str:
@@ -133,38 +128,27 @@ def extract_text(file: UploadFile) -> str:
 # =========================================================
 # AZURE OPENAI CLIENT & ANALYSIS
 # =========================================================
-AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
-AZURE_OPENAI_KEY = "YOUR_AZURE_OPENAI_KEY"
-AZURE_OPENAI_DEPLOYMENT = "gpt-4o"
-
-client = AzureOpenAI(
-    api_key=AZURE_OPENAI_KEY,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    api_version="2024-02-15-preview"
-)
-
-
 def analyze_with_ai(text: str) -> dict:
-    """Send document text to Azure OpenAI for analysis"""
+    client = get_azure_openai_client()
+
     prompt = f"""
 You are a Senior Software Business Analyst and QA Architect.
 
-Return ONLY valid JSON.
+ONLY return valid JSON.
 
-If NOT software-related:
+If the document is NOT related to software requirements,
+return:
 {{"is_software_related": false, "reason": "..." }}
 
-If software-related:
+If software-related, return:
 {{
   "is_software_related": true,
   "reason": "...",
   "user_stories": ["Feature: ... | Aim: ..."],
-  "software_flow": ["Step 1: ...", "Step 2: ..."],
+  "software_flow": ["Step 1", "Step 2"],
   "test_cases": [
     {{
       "test_case_description": "...",
-      "pre_requisite_test_id": null,
-      "pre_requisite_test_description": null,
       "tags": ["Regression"],
       "test_steps": ["Step 1", "Step 2"],
       "arguments": ["arg1"]
@@ -177,15 +161,30 @@ DOCUMENT:
 """
 
     response = client.chat.completions.create(
-        model=AZURE_OPENAI_DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": "Strict JSON only"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
+        model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+        messages=[{"role": "system", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0.1,
+        max_tokens=4000,
+        top_p=0.95,
+        timeout=300
     )
 
     return json.loads(response.choices[0].message.content)
+
+# =========================================================
+# TEST CASE ID GENERATOR (GLOBAL UNIQUE)
+# =========================================================
+def generate_gtc_id(db: Session) -> str:
+    last = db.query(TestCaseModel).order_by(TestCaseModel.id.desc()).first()
+    if not last:
+        return "GTC001"
+    num = int(last.test_case_id.replace("GTC", "")) + 1
+    return f"GTC{num:03d}"
+
+
+
+
 
 # =========================================================
 # API ENDPOINT
