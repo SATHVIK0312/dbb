@@ -1,42 +1,102 @@
 # =========================================================
-# IMPORTS & LIBRARIES
+# IMPORTS
 # =========================================================
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
-from typing import List, Optional
-import tempfile
 import os
+import io
 import json
+import sqlite3
+from typing import List, Optional
 
-# ---------- File Parsing ----------
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
+
+# ---------- File parsing ----------
 import fitz  # PyMuPDF
-import docx
+from docx import Document
 import openpyxl
 
 # ---------- Azure OpenAI ----------
 from openai import AzureOpenAI
 
 # =========================================================
-# FASTAPI APP INIT
+# FASTAPI APP
 # =========================================================
-app = FastAPI(title="Document Intelligence API")
+app = FastAPI(title="Document Intelligence API (No ORM)")
 
 # =========================================================
-# DATABASE CONFIGURATION (SQLITE)
+# DATABASE (sqlite3 – standard library)
 # =========================================================
-DATABASE_URL = "sqlite:///./document_intelligence.db"
+DB_PATH = "document_ai.db"
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # =========================================================
-# DATABASE MODELS
+# CREATE TABLES (ON STARTUP)
 # =========================================================
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        is_software_related INTEGER NOT NULL,
+        reason TEXT
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_stories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id INTEGER,
+        story TEXT,
+        FOREIGN KEY(document_id) REFERENCES documents(id)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS software_flows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id INTEGER,
+        step TEXT,
+        FOREIGN KEY(document_id) REFERENCES documents(id)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS test_cases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id INTEGER,
+        test_case_id TEXT UNIQUE,
+        description TEXT,
+        pre_req_id TEXT,
+        pre_req_desc TEXT,
+        tags TEXT,
+        steps TEXT,
+        arguments TEXT,
+        FOREIGN KEY(document_id) REFERENCES documents(id)
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# =========================================================
+# PYDANTIC SCHEMAS (ONLY SCHEMAS, NO ORM)
+# =========================================================
+class UserStorySchema(BaseModel):
+    story: str
+
+
+class SoftwareFlowSchema(BaseModel):
+    step: str
+
 
 class TestCaseSchema(BaseModel):
     test_case_id: str
@@ -47,82 +107,17 @@ class TestCaseSchema(BaseModel):
     steps: Optional[str]
     arguments: Optional[str]
 
-    model_config = {"from_attributes": True}
-
 
 class DocumentResponseSchema(BaseModel):
     document_id: int
+    filename: str
     is_software_related: bool
-    reason: str
+    reason: Optional[str]
     test_cases_generated: int
 
-class DocumentModel(Base):
-    __tablename__ = "documents"
-
-    id = Column(Integer, primary_key=True)
-    filename = Column(String, nullable=False)
-    is_software_related = Column(Integer)
-    reason = Column(Text)
-
-    user_stories = relationship("UserStoryModel", cascade="all, delete")
-    flows = relationship("SoftwareFlowModel", cascade="all, delete")
-    test_cases = relationship("TestCaseModel", cascade="all, delete")
-
-
-class UserStory(Base):
-    __tablename__ = "user_stories"
-
-    id = Column(Integer, primary_key=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    story = Column(Text)
-
-    document = relationship("Document", back_populates="user_stories")
-
-
-class SoftwareFlow(Base):
-    __tablename__ = "software_flows"
-
-    id = Column(Integer, primary_key=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    step = Column(Text)
-
-    document = relationship("Document", back_populates="flows")
-
-
-class TestCase(Base):
-    __tablename__ = "test_cases"
-
-    id = Column(Integer, primary_key=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-
-    test_case_id = Column(String, unique=True, index=True)
-    description = Column(Text)
-
-    pre_req_id = Column(String, nullable=True)
-    pre_req_desc = Column(Text, nullable=True)
-
-    tags = Column(Text)
-    steps = Column(Text)
-    arguments = Column(Text)
-
-    document = relationship("Document", back_populates="test_cases")
-
-
-Base.metadata.create_all(bind=engine)
-
 # =========================================================
-# DEPENDENCY: DATABASE SESSION
+# FILE TEXT EXTRACTION
 # =========================================================
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-
-
 def extract_text(file: UploadFile) -> str:
     content = file.file.read()
 
@@ -145,7 +140,17 @@ def extract_text(file: UploadFile) -> str:
     raise HTTPException(status_code=400, detail="Unsupported file type")
 
 # =========================================================
-# AZURE OPENAI CLIENT & ANALYSIS
+# AZURE OPENAI CLIENT (YOUR REQUIRED STYLE)
+# =========================================================
+def get_azure_openai_client() -> AzureOpenAI:
+    return AzureOpenAI(
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_KEY"),
+        api_version="2024-02-15-preview"
+    )
+
+# =========================================================
+# AI ANALYSIS
 # =========================================================
 def analyze_with_ai(text: str) -> dict:
     client = get_azure_openai_client()
@@ -155,11 +160,10 @@ You are a Senior Software Business Analyst and QA Architect.
 
 ONLY return valid JSON.
 
-If the document is NOT related to software requirements,
-return:
-{{"is_software_related": false, "reason": "..." }}
+If NOT software-related:
+{{"is_software_related": false, "reason": "..."}}
 
-If software-related, return:
+If software-related:
 {{
   "is_software_related": true,
   "reason": "...",
@@ -192,295 +196,97 @@ DOCUMENT:
     return json.loads(response.choices[0].message.content)
 
 # =========================================================
-# TEST CASE ID GENERATOR (GLOBAL UNIQUE)
+# GTC ID GENERATOR (GLOBAL, SQLITE)
 # =========================================================
-def generate_gtc_id(db: Session) -> str:
-    last = db.query(TestCaseModel).order_by(TestCaseModel.id.desc()).first()
-    if not last:
+def generate_gtc_id(conn: sqlite3.Connection) -> str:
+    cur = conn.cursor()
+    cur.execute("SELECT test_case_id FROM test_cases ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+
+    if not row:
         return "GTC001"
-    num = int(last.test_case_id.replace("GTC", "")) + 1
-    return f"GTC{num:03d}"
 
-
-
-
+    last_num = int(row["test_case_id"].replace("GTC", ""))
+    return f"GTC{last_num + 1:03d}"
 
 # =========================================================
 # API ENDPOINT
 # =========================================================
 @app.post("/analyze-document", response_model=DocumentResponseSchema)
-async def analyze_document(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
+async def analyze_document(file: UploadFile = File(...)):
     text = extract_text(file)
     result = analyze_with_ai(text)
 
-    document = DocumentModel(
-        filename=file.filename,
-        is_software_related=int(result["is_software_related"]),
-        reason=result["reason"]
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Insert document
+    cur.execute(
+        "INSERT INTO documents (filename, is_software_related, reason) VALUES (?, ?, ?)",
+        (file.filename, int(result["is_software_related"]), result["reason"])
     )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
+    document_id = cur.lastrowid
 
     if not result["is_software_related"]:
+        conn.commit()
+        conn.close()
         return DocumentResponseSchema(
-            document_id=document.id,
+            document_id=document_id,
+            filename=file.filename,
             is_software_related=False,
             reason=result["reason"],
             test_cases_generated=0
         )
 
-    for story in result["user_stories"]:
-        db.add(UserStoryModel(document_id=document.id, story=story))
+    # User stories
+    for us in result["user_stories"]:
+        cur.execute(
+            "INSERT INTO user_stories (document_id, story) VALUES (?, ?)",
+            (document_id, us)
+        )
 
+    # Software flow
     for step in result["software_flow"]:
-        db.add(SoftwareFlowModel(document_id=document.id, step=step))
+        cur.execute(
+            "INSERT INTO software_flows (document_id, step) VALUES (?, ?)",
+            (document_id, step)
+        )
 
+    # Test cases
     count = 0
     for tc in result["test_cases"]:
-        tc_id = generate_gtc_id(db)
-        db.add(TestCaseModel(
-            document_id=document.id,
-            test_case_id=tc_id,
-            description=tc["test_case_description"],
-            pre_req_id="USER_INPUT",
-            pre_req_desc="USER_INPUT",
-            tags=",".join(tc.get("tags", [])),
-            steps="\n".join(tc.get("test_steps", [])),
-            arguments=",".join(tc.get("arguments", []))
-        ))
+        tc_id = generate_gtc_id(conn)
+        cur.execute(
+            """
+            INSERT INTO test_cases
+            (document_id, test_case_id, description, pre_req_id, pre_req_desc, tags, steps, arguments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                document_id,
+                tc_id,
+                tc["test_case_description"],
+                "USER_INPUT",
+                "USER_INPUT",
+                ",".join(tc.get("tags", [])),
+                "\n".join(tc.get("test_steps", [])),
+                ",".join(tc.get("arguments", []))
+            )
+        )
         count += 1
 
-    db.commit()
+    conn.commit()
+    conn.close()
 
     return DocumentResponseSchema(
-        document_id=document.id,
+        document_id=document_id,
+        filename=file.filename,
         is_software_related=True,
         reason=result["reason"],
         test_cases_generated=count
     )
 
-
-==================================================================
-==================================================================
-
-CREATE TABLE documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    is_software_related INTEGER NOT NULL, -- 1 = true, 0 = false
-    reason TEXT
-);
-
-
-CREATE TABLE user_stories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL,
-    story TEXT NOT NULL,
-    FOREIGN KEY (document_id)
-        REFERENCES documents (id)
-        ON DELETE CASCADE
-);
-
-
-CREATE TABLE software_flows (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL,
-    step TEXT NOT NULL,
-    FOREIGN KEY (document_id)
-        REFERENCES documents (id)
-        ON DELETE CASCADE
-);
-
-
-
-CREATE TABLE test_cases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    document_id INTEGER NOT NULL,
-
-    test_case_id TEXT NOT NULL UNIQUE,   -- GTC001, GTC002, ...
-    description TEXT NOT NULL,
-
-    pre_req_id TEXT,
-    pre_req_desc TEXT,
-
-    tags TEXT,        -- comma-separated
-    steps TEXT,       -- newline-separated
-    arguments TEXT,   -- comma-separated
-
-    FOREIGN KEY (document_id)
-        REFERENCES documents (id)
-        ON DELETE CASCADE
-);
-
-
-
-===================================================================
-===================================================================
-
-class TestCaseSchema(BaseModel):
-    test_case_id: str
-    description: str
-    pre_req_id: Optional[str]
-    pre_req_desc: Optional[str]
-    tags: Optional[str]
-    steps: Optional[str]
-    arguments: Optional[str]
-
-    model_config = {
-        "from_attributes": True  # REQUIRED in Pydantic v2
-    }
-
-
-class UserStorySchema(BaseModel):
-    story: str
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-class SoftwareFlowSchema(BaseModel):
-    step: str
-
-    model_config = {
-        "from_attributes": True
-    }
-
-class DocumentResponseSchema(BaseModel):
-    id: int
-    filename: str
-    is_software_related: int
-    reason: Optional[str]
-    user_stories: List[UserStorySchema] = []
-    flows: List[SoftwareFlowSchema] = []
-    test_cases: List[TestCaseSchema] = []
-
-    model_config = {
-        "from_attributes": True
-    }
-
-
-
-
-
-
-
-
-
-
-========================================
-
 # =========================================================
-# SQLALCHEMY ORM MODELS (DB LAYER ONLY)
+# RUN
 # =========================================================
-
-class DocumentORM(Base):
-    __tablename__ = "documents"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    filename: Mapped[str] = mapped_column(String, nullable=False)
-    is_software_related: Mapped[int] = mapped_column(Integer, nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(Text)
-
-    user_stories: Mapped[List["UserStoryORM"]] = relationship(
-        back_populates="document",
-        cascade="all, delete-orphan"
-    )
-    flows: Mapped[List["SoftwareFlowORM"]] = relationship(
-        back_populates="document",
-        cascade="all, delete-orphan"
-    )
-    test_cases: Mapped[List["TestCaseORM"]] = relationship(
-        back_populates="document",
-        cascade="all, delete-orphan"
-    )
-
-
-class UserStoryORM(Base):
-    __tablename__ = "user_stories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    document_id: Mapped[int] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE")
-    )
-    story: Mapped[str] = mapped_column(Text, nullable=False)
-
-    document: Mapped["DocumentORM"] = relationship(back_populates="user_stories")
-
-
-class SoftwareFlowORM(Base):
-    __tablename__ = "software_flows"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    document_id: Mapped[int] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE")
-    )
-    step: Mapped[str] = mapped_column(Text, nullable=False)
-
-    document: Mapped["DocumentORM"] = relationship(back_populates="flows")
-
-
-class TestCaseORM(Base):
-    __tablename__ = "test_cases"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    document_id: Mapped[int] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE")
-    )
-
-    test_case_id: Mapped[str] = mapped_column(String, unique=True, index=True)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-
-    pre_req_id: Mapped[Optional[str]] = mapped_column(String)
-    pre_req_desc: Mapped[Optional[str]] = mapped_column(Text)
-
-    tags: Mapped[Optional[str]] = mapped_column(Text)
-    steps: Mapped[Optional[str]] = mapped_column(Text)
-    arguments: Mapped[Optional[str]] = mapped_column(Text)
-
-    document: Mapped["DocumentORM"] = relationship(back_populates="test_cases")
-
-# =========================================================
-# PYDANTIC SCHEMAS (API LAYER ONLY)
-# =========================================================
-
-class UserStorySchema(BaseModel):
-    id: Optional[int]
-    story: str
-
-    model_config = {"from_attributes": True}
-
-
-class SoftwareFlowSchema(BaseModel):
-    id: Optional[int]
-    step: str
-
-    model_config = {"from_attributes": True}
-
-
-class TestCaseSchema(BaseModel):
-    test_case_id: str
-    description: str
-    pre_req_id: Optional[str]
-    pre_req_desc: Optional[str]
-    tags: Optional[str]
-    steps: Optional[str]
-    arguments: Optional[str]
-
-    model_config = {"from_attributes": True}
-
-
-class DocumentResponseSchema(BaseModel):
-    document_id: int
-    filename: str
-    is_software_related: bool
-    reason: Optional[str]
-    user_stories: List[UserStorySchema] = []
-    flows: List[SoftwareFlowSchema] = []
-    test_cases: List[TestCaseSchema] = []
-
-    model_config = {"from_attributes": True}
-
+# uvicorn api:app --reload
