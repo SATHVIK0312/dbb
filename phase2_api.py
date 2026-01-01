@@ -212,81 +212,27 @@ def generate_gtc_id(conn: sqlite3.Connection) -> str:
 # =========================================================
 # API ENDPOINT
 # =========================================================
-@app.post("/analyze-document", response_model=DocumentResponseSchema)
+@app.post("/analyze-document")
 async def analyze_document(file: UploadFile = File(...)):
-    text = extract_text(file)
-    result = analyze_with_ai(text)
+    # 1. Get async DB connection
+    conn = await get_db_connection()
 
-    conn = get_db()
-    cur = conn.cursor()
-
-    # Insert document
-    cur.execute(
-        "INSERT INTO documents (filename, is_software_related, reason) VALUES (?, ?, ?)",
-        (file.filename, int(result["is_software_related"]), result["reason"])
-    )
-    document_id = cur.lastrowid
-
-    if not result["is_software_related"]:
-        conn.commit()
-        conn.close()
-        return DocumentResponseSchema(
-            document_id=document_id,
-            filename=file.filename,
-            is_software_related=False,
-            reason=result["reason"],
-            test_cases_generated=0
-        )
-
-    # User stories
-    for us in result["user_stories"]:
-        cur.execute(
-            "INSERT INTO user_stories (document_id, story) VALUES (?, ?)",
-            (document_id, us)
-        )
-
-    # Software flow
-    for step in result["software_flow"]:
-        cur.execute(
-            "INSERT INTO software_flows (document_id, step) VALUES (?, ?)",
-            (document_id, step)
-        )
-
-    # Test cases
-    count = 0
-    for tc in result["test_cases"]:
-        tc_id = generate_gtc_id(conn)
-        cur.execute(
-            """
-            INSERT INTO test_cases
-            (document_id, test_case_id, description, pre_req_id, pre_req_desc, tags, steps, arguments)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                document_id,
-                tc_id,
-                tc["test_case_description"],
-                "USER_INPUT",
-                "USER_INPUT",
-                ",".join(tc.get("tags", [])),
-                "\n".join(tc.get("test_steps", [])),
-                ",".join(tc.get("arguments", []))
+    try:
+        # 2. Use async cursor
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO documents (filename, is_software_related, reason) VALUES (?, ?, ?)",
+                (file.filename, 1, "sample reason")
             )
-        )
-        count += 1
 
-    conn.commit()
-    conn.close()
+            document_id = cur.lastrowid
 
-    return DocumentResponseSchema(
-        document_id=document_id,
-        filename=file.filename,
-        is_software_related=True,
-        reason=result["reason"],
-        test_cases_generated=count
-    )
+            await conn.commit()
 
-# =========================================================
-# RUN
-# =========================================================
-# uvicorn api:app --reload
+        return {
+            "document_id": document_id,
+            "status": "saved"
+        }
+
+    finally:
+        await conn.close()
