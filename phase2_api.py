@@ -362,3 +362,125 @@ class DocumentResponseSchema(BaseModel):
         "from_attributes": True
     }
 
+
+
+
+
+
+
+
+
+
+========================================
+
+# =========================================================
+# SQLALCHEMY ORM MODELS (DB LAYER ONLY)
+# =========================================================
+
+class DocumentORM(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    is_software_related: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+
+    user_stories: Mapped[List["UserStoryORM"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
+    flows: Mapped[List["SoftwareFlowORM"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
+    test_cases: Mapped[List["TestCaseORM"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
+
+
+class UserStoryORM(Base):
+    __tablename__ = "user_stories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    story: Mapped[str] = mapped_column(Text, nullable=False)
+
+    document: Mapped["DocumentORM"] = relationship(back_populates="user_stories")
+
+
+class SoftwareFlowORM(Base):
+    __tablename__ = "software_flows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    step: Mapped[str] = mapped_column(Text, nullable=False)
+
+    document: Mapped["DocumentORM"] = relationship(back_populates="flows")
+
+
+class TestCaseORM(Base):
+    __tablename__ = "test_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE")
+    )
+
+    test_case_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+    pre_req_id: Mapped[Optional[str]] = mapped_column(String)
+    pre_req_desc: Mapped[Optional[str]] = mapped_column(Text)
+
+    tags: Mapped[Optional[str]] = mapped_column(Text)
+    steps: Mapped[Optional[str]] = mapped_column(Text)
+    arguments: Mapped[Optional[str]] = mapped_column(Text)
+
+    document: Mapped["DocumentORM"] = relationship(back_populates="test_cases")
+
+# =========================================================
+# PYDANTIC SCHEMAS (API LAYER ONLY)
+# =========================================================
+
+class UserStorySchema(BaseModel):
+    id: Optional[int]
+    story: str
+
+    model_config = {"from_attributes": True}
+
+
+class SoftwareFlowSchema(BaseModel):
+    id: Optional[int]
+    step: str
+
+    model_config = {"from_attributes": True}
+
+
+class TestCaseSchema(BaseModel):
+    test_case_id: str
+    description: str
+    pre_req_id: Optional[str]
+    pre_req_desc: Optional[str]
+    tags: Optional[str]
+    steps: Optional[str]
+    arguments: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentResponseSchema(BaseModel):
+    document_id: int
+    filename: str
+    is_software_related: bool
+    reason: Optional[str]
+    user_stories: List[UserStorySchema] = []
+    flows: List[SoftwareFlowSchema] = []
+    test_cases: List[TestCaseSchema] = []
+
+    model_config = {"from_attributes": True}
+
