@@ -255,3 +255,55 @@ async def analyze_document(
     finally:
         os.remove(temp_path)
 
+
+==================================================================
+==================================================================
+
+CREATE TABLE documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    is_software_related INTEGER NOT NULL, -- 1 = true, 0 = false
+    reason TEXT
+);
+
+
+CREATE TABLE user_stories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    story TEXT NOT NULL,
+    FOREIGN KEY (document_id)
+        REFERENCES documents (id)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE software_flows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    step TEXT NOT NULL,
+    FOREIGN KEY (document_id)
+        REFERENCES documents (id)
+        ON DELETE CASCADE
+);
+
+
+
+CREATE TABLE test_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+
+    test_case_id TEXT NOT NULL UNIQUE,   -- GTC001, GTC002, ...
+    description TEXT NOT NULL,
+
+    pre_req_id TEXT,
+    pre_req_desc TEXT,
+
+    tags TEXT,        -- comma-separated
+    steps TEXT,       -- newline-separated
+    arguments TEXT,   -- comma-separated
+
+    FOREIGN KEY (document_id)
+        REFERENCES documents (id)
+        ON DELETE CASCADE
+);
+
