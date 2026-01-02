@@ -3,21 +3,22 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using jpmc_genai.Services;
+using JPMCGenAI_v1._0.Services;
 
 namespace JPMCGenAI_v1._0
 {
     public partial class KnowledgeCenterPage : Page
     {
+        private readonly string _projectId;
         private string _selectedFilePath;
         private AnalyzeResult _lastAnalyzeResult;
 
-        public KnowledgeCenterPage()
+        public KnowledgeCenterPage(string projectId = "")
         {
             InitializeComponent();
+            _projectId = projectId;
         }
 
         // =====================================================
@@ -38,41 +39,36 @@ namespace JPMCGenAI_v1._0
         }
 
         // =====================================================
-        // ANALYZE DOCUMENT (FIXED)
+        // ANALYZE DOCUMENT
         // =====================================================
         private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrEmpty(_selectedFilePath))
             {
-                MessageBox.Show("Please select a document first.", "Validation",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("Please select a document first.",
+                    "Validation",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return;
             }
 
             try
             {
-                AnalyzeButtonState(false);
-
                 using var client = new ApiClient();
                 client.SetBearer(Session.Token);
 
-                // 🔹 IMPORTANT: route must match FastAPI
                 HttpResponseMessage response =
                     await client.PostFileAsync("analyze-document", _selectedFilePath);
 
                 string json = await response.Content.ReadAsStringAsync();
-
-                System.Diagnostics.Debug.WriteLine("=== ANALYZE RESPONSE ===");
                 System.Diagnostics.Debug.WriteLine(json);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    MessageBox.Show(
-                        $"Analyze failed: {response.StatusCode}",
+                    MessageBox.Show($"Analyze failed: {response.StatusCode}",
                         "API Error",
                         MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
+                        MessageBoxImage.Error);
                     return;
                 }
 
@@ -83,31 +79,27 @@ namespace JPMCGenAI_v1._0
 
                 if (_lastAnalyzeResult == null)
                 {
-                    MessageBox.Show("Unable to parse analysis result.", "Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Unable to parse analysis result.",
+                        "Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
                     return;
                 }
 
-                // =================================================
-                // PREVIEW BINDING
-                // =================================================
+                // Preview binding
                 UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories ?? new();
                 FlowList.ItemsSource = _lastAnalyzeResult.software_flow ?? new();
                 TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases ?? new();
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ERROR] {ex}");
+                System.Diagnostics.Debug.WriteLine(ex);
                 MessageBox.Show(
-                    $"Unexpected error during analysis:\n{ex.Message}",
+                    $"Unexpected error:\n{ex.Message}",
                     "Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error
                 );
-            }
-            finally
-            {
-                AnalyzeButtonState(true);
             }
         }
 
@@ -118,38 +110,25 @@ namespace JPMCGenAI_v1._0
         {
             if (_lastAnalyzeResult == null)
             {
-                MessageBox.Show(
-                    "Please analyze a document before saving.",
+                MessageBox.Show("Analyze a document before saving.",
                     "Validation",
                     MessageBoxButton.OK,
-                    MessageBoxImage.Warning
-                );
+                    MessageBoxImage.Warning);
                 return;
             }
 
-            MessageBox.Show(
-                "✅ Document saved successfully",
+            MessageBox.Show("✅ Document saved successfully",
                 "Saved",
                 MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
+                MessageBoxImage.Information);
         }
 
         // =====================================================
-        // UI HELPERS
-        // =====================================================
-        private void AnalyzeButtonState(bool enabled)
-        {
-            AnalyzeButton.IsEnabled = enabled;
-            AnalyzeButton.Content = enabled ? "Analyze" : "Analyzing...";
-        }
-
-        // =====================================================
-        // SIDEBAR NAVIGATION (SAFE)
+        // SIDEBAR NAVIGATION
         // =====================================================
         private void BackToDashboard_Click(object sender, RoutedEventArgs e)
         {
-            NavigationService?.Navigate(new DashboardPage(Session.CurrentProjectId));
+            NavigationService?.Navigate(new DashboardPage(_projectId));
         }
 
         private void UploadTestCase_Click(object sender, RoutedEventArgs e)
@@ -159,7 +138,7 @@ namespace JPMCGenAI_v1._0
 
         private void AITestExecutor_Click(object sender, RoutedEventArgs e)
         {
-            NavigationService?.Navigate(new AITestExecutorPage(Session.CurrentProjectId));
+            NavigationService?.Navigate(new AITestExecutorPage(_projectId));
         }
 
         private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
@@ -173,7 +152,7 @@ namespace JPMCGenAI_v1._0
         }
 
         // =====================================================
-        // UI MODELS (MATCH BACKEND RESPONSE)
+        // UI MODELS
         // =====================================================
         private class AnalyzeResult
         {
@@ -187,7 +166,6 @@ namespace JPMCGenAI_v1._0
             public string test_case_id { get; set; }
             public string test_case_description { get; set; }
 
-            // DataGrid-friendly
             public string TestCaseId => test_case_id;
             public string Description => test_case_description;
         }
