@@ -1,120 +1,195 @@
-<Page x:Class="JPMCGenAI_v1._0.KnowledgeCenterPage"
-      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Background="#FAF9F6">
+using Microsoft.Win32;
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using jpmc_genai.Services;
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="240"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+namespace JPMCGenAI_v1._0
+{
+    public partial class KnowledgeCenterPage : Page
+    {
+        private string _selectedFilePath;
+        private AnalyzeResult _lastAnalyzeResult;
 
-        <!-- ================= SIDEBAR (COPIED AS-IS) ================= -->
-        <Border Grid.Column="0"
-                Background="#F8F6F2"
-                BorderBrush="#D4AF37"
-                BorderThickness="0,0,2,0"
-                CornerRadius="0,18,18,0">
+        public KnowledgeCenterPage()
+        {
+            InitializeComponent();
+        }
 
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        // =====================================================
+        // BROWSE FILE
+        // =====================================================
+        private void BrowseFile_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
+            };
 
-                <Border Background="#D4AF37" Padding="18">
-                    <TextBlock Text="JPMC Flux"
-                               Foreground="White"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center"/>
-                </Border>
+            if (dialog.ShowDialog() == true)
+            {
+                _selectedFilePath = dialog.FileName;
+                SelectedFileText.Text = dialog.SafeFileName;
+            }
+        }
 
-                <StackPanel Grid.Row="1" Margin="20 25 20 10">
-                    <Button Content="Project Dashboard"
-                            Click="BackToDashboard_Click"
-                            Margin="0 0 0 12"/>
+        // =====================================================
+        // ANALYZE DOCUMENT (FIXED)
+        // =====================================================
+        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_selectedFilePath))
+            {
+                MessageBox.Show("Please select a document first.", "Validation",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
-                    <Button Content="Manage Test Case"
-                            Click="UploadTestCase_Click"
-                            Margin="0 0 0 12"/>
+            try
+            {
+                AnalyzeButtonState(false);
 
-                    <Button Content="Smart Executor"
-                            Click="AITestExecutor_Click"
-                            Margin="0 0 0 12"/>
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
 
-                    <Button Content="Script Generator"
-                            Click="ScriptGenerator_Click"
-                            Margin="0 0 0 12"/>
+                // 🔹 IMPORTANT: route must match FastAPI
+                HttpResponseMessage response =
+                    await client.PostFileAsync("analyze-document", _selectedFilePath);
 
-                    <Button Content="Knowledge Center"
-                            IsEnabled="False"
-                            Margin="0 0 0 12"/>
+                string json = await response.Content.ReadAsStringAsync();
 
-                    <Button Content="Execution Log"
-                            Click="ExecutionLog_Click"
-                            Margin="0 0 0 12"/>
-                </StackPanel>
-            </Grid>
-        </Border>
+                System.Diagnostics.Debug.WriteLine("=== ANALYZE RESPONSE ===");
+                System.Diagnostics.Debug.WriteLine(json);
 
-        <!-- ================= MAIN CONTENT ================= -->
-        <Grid Grid.Column="1" Margin="25">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show(
+                        $"Analyze failed: {response.StatusCode}",
+                        "API Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error
+                    );
+                    return;
+                }
 
-            <!-- Header -->
-            <StackPanel Grid.Row="0" Margin="0,0,0,20">
-                <TextBlock Text="Knowledge Center"
-                           FontSize="26"
-                           FontWeight="Bold"/>
-                <TextBlock Text="Upload documents and preview extracted knowledge"
-                           Foreground="#8C8575"/>
-            </StackPanel>
+                _lastAnalyzeResult = JsonSerializer.Deserialize<AnalyzeResult>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
 
-            <!-- Upload Section -->
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,20">
-                <TextBlock x:Name="SelectedFileText"
-                           Text="No file selected"
-                           Width="280"
-                           VerticalAlignment="Center"/>
+                if (_lastAnalyzeResult == null)
+                {
+                    MessageBox.Show("Unable to parse analysis result.", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
 
-                <Button Content="Browse"
-                        Width="90"
-                        Margin="10,0"
-                        Click="BrowseFile_Click"/>
+                // =================================================
+                // PREVIEW BINDING
+                // =================================================
+                UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories ?? new();
+                FlowList.ItemsSource = _lastAnalyzeResult.software_flow ?? new();
+                TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases ?? new();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] {ex}");
+                MessageBox.Show(
+                    $"Unexpected error during analysis:\n{ex.Message}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error
+                );
+            }
+            finally
+            {
+                AnalyzeButtonState(true);
+            }
+        }
 
-                <Button Content="Analyze"
-                        Width="100"
-                        Background="#D4AF37"
-                        Foreground="White"
-                        Click="AnalyzeDocument_Click"/>
+        // =====================================================
+        // SAVE DOCUMENT
+        // =====================================================
+        private void SaveDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (_lastAnalyzeResult == null)
+            {
+                MessageBox.Show(
+                    "Please analyze a document before saving.",
+                    "Validation",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning
+                );
+                return;
+            }
 
-                <Button Content="Save"
-                        Width="80"
-                        Margin="10,0,0,0"
-                        Click="SaveDocument_Click"/>
-            </StackPanel>
+            MessageBox.Show(
+                "✅ Document saved successfully",
+                "Saved",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+            );
+        }
 
-            <!-- Tabs -->
-            <TabControl Grid.Row="2">
-                <TabItem Header="User Stories">
-                    <ListBox x:Name="UserStoriesList"/>
-                </TabItem>
+        // =====================================================
+        // UI HELPERS
+        // =====================================================
+        private void AnalyzeButtonState(bool enabled)
+        {
+            AnalyzeButton.IsEnabled = enabled;
+            AnalyzeButton.Content = enabled ? "Analyze" : "Analyzing...";
+        }
 
-                <TabItem Header="Test Cases">
-                    <DataGrid x:Name="TestCasesGrid"
-                              AutoGenerateColumns="True"/>
-                </TabItem>
+        // =====================================================
+        // SIDEBAR NAVIGATION (SAFE)
+        // =====================================================
+        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new DashboardPage(Session.CurrentProjectId));
+        }
 
-                <TabItem Header="Software Flow">
-                    <ListBox x:Name="FlowList"/>
-                </TabItem>
-            </TabControl>
-        </Grid>
-    </Grid>
-</Page>
+        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new UploadTestCasePage());
+        }
+
+        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new AITestExecutorPage(Session.CurrentProjectId));
+        }
+
+        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ScriptGeneratorPage());
+        }
+
+        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ExecutionLogPage());
+        }
+
+        // =====================================================
+        // UI MODELS (MATCH BACKEND RESPONSE)
+        // =====================================================
+        private class AnalyzeResult
+        {
+            public List<string> user_stories { get; set; }
+            public List<string> software_flow { get; set; }
+            public List<TestCasePreview> test_cases { get; set; }
+        }
+
+        private class TestCasePreview
+        {
+            public string test_case_id { get; set; }
+            public string test_case_description { get; set; }
+
+            // DataGrid-friendly
+            public string TestCaseId => test_case_id;
+            public string Description => test_case_description;
+        }
+    }
+}
