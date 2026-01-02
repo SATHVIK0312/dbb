@@ -1,89 +1,71 @@
-elif "radio button" in step_lower:
-    action_type = "RADIO"
-
-
 elif action_type == "RADIO":
 
     step_lower = step_name.lower()
 
-    # -----------------------------------------
-    # Extract radio value (Y / N)
-    # -----------------------------------------
-    if "value =" not in step_lower:
-        raise RuntimeError("RADIO step missing 'value ='")
+    # ------------------------------------------------
+    # 1. Extract radio value (Y / N)
+    # ------------------------------------------------
+    match = re.search(r"value\s*=\s*([yn])", step_lower)
+    if not match:
+        raise RuntimeError("RADIO step must specify value = Y or N")
 
-    radio_value = (
-        step_name
-        .split("value =", 1)[1]
-        .split(" in the ")[0]
-        .strip()
-        .strip('"')
-        .lower()
-    )
+    radio_value = match.group(1).upper()
 
-    # -----------------------------------------
-    # Resolve frames
-    # -----------------------------------------
+    # ------------------------------------------------
+    # 2. Resolve frames
+    # ------------------------------------------------
     nav_frame, content_frame = resolve_ccs_frames(page)
 
-    # -----------------------------------------
-    # Optional section scoping
-    # -----------------------------------------
-    section = None
-    if " in the " in step_lower:
-        section = (
-            step_lower
-            .split(" in the ", 1)[1]
-            .replace("section", "")
-            .strip()
-        )
+    # ------------------------------------------------
+    # 3. Identify ACTIVE ERBE QUESTION BLOCK
+    # ------------------------------------------------
+    # erbeQA blocks contain exactly one active question
+    questions = content_frame.locator("div.erbeQA")
 
-    if section:
-        section_root = content_frame.locator(
-            f"div:has-text('{section.title()}')"
-        )
-        radio_candidates = section_root.locator("input[type='radio']")
-    else:
-        radio_candidates = content_frame.locator("input[type='radio']")
-
-    total = await radio_candidates.count()
-    if total == 0:
-        raise RuntimeError("No radio buttons found")
+    q_count = await questions.count()
+    if q_count == 0:
+        raise RuntimeError("No ERBE question blocks found")
 
     selected = False
 
-    # -----------------------------------------
-    # CLICK ONLY ACTIVE + VISIBLE RADIO
-    # -----------------------------------------
-    for i in range(total):
-        radio = radio_candidates.nth(i)
+    for i in range(q_count):
+        q = questions.nth(i)
 
-        # Skip hidden radios
-        if not await radio.is_visible():
+        # Skip hidden/inactive questions
+        if not await q.is_visible():
             continue
 
-        # Skip disabled radios
-        if await radio.is_disabled():
+        radios = q.locator("input[type='radio']")
+
+        r_count = await radios.count()
+        if r_count == 0:
             continue
 
-        value_attr = (await radio.get_attribute("value") or "").lower()
+        for j in range(r_count):
+            radio = radios.nth(j)
 
-        if value_attr == radio_value:
-            await radio.scroll_into_view_if_needed()
-            await radio.wait_for(state="visible", timeout=5000)
-            await radio.click(force=True)
-            await content_frame.wait_for_timeout(300)
+            if await radio.is_disabled():
+                continue
 
-            logger.info(
-                LogCategory.EXECUTION,
-                f"[PHASE 3] RADIO selected successfully: value={radio_value}, section={section}"
-            )
+            value_attr = (await radio.get_attribute("value") or "").upper()
 
-            selected = True
+            if value_attr == radio_value:
+                await radio.scroll_into_view_if_needed()
+                await radio.wait_for(state="visible", timeout=5000)
+                await radio.check(force=True)
+
+                logger.info(
+                    LogCategory.EXECUTION,
+                    f"[PHASE 3] RADIO selected: value={radio_value} in active ERBE question"
+                )
+
+                selected = True
+                break
+
+        if selected:
             break
 
     if not selected:
         raise RuntimeError(
-            f"No ACTIVE radio button with value '{radio_value}' found"
+            f"Active ERBE radio with value '{radio_value}' not found"
         )
-
