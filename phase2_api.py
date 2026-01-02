@@ -1,173 +1,115 @@
-using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Text.Json;
-using System.Windows;
-using System.Windows.Controls;
-using JPMCGenAI_v1._0.Services;
+<Button x:Name="AnalyzeButton"
+        Content="Analyze"
+        Width="100"
+        Background="#D4AF37"
+        Foreground="White"
+        Click="AnalyzeDocument_Click"/>
 
-namespace JPMCGenAI_v1._0
+
+
+<!-- RAW API PREVIEW -->
+<Border Grid.Row="2"
+        Background="White"
+        BorderBrush="#E2E1DC"
+        BorderThickness="1"
+        CornerRadius="8"
+        Padding="10"
+        Margin="0,0,0,10">
+
+    <ScrollViewer Height="140">
+        <TextBlock x:Name="PreviewTextBlock"
+                   Text="Preview will appear here after analysis..."
+                   TextWrapping="Wrap"
+                   Foreground="#444"
+                   FontFamily="Consolas"
+                   FontSize="12"/>
+    </ScrollViewer>
+</Border>
+
+
+
+
+private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
 {
-    public partial class KnowledgeCenterPage : Page
+    if (string.IsNullOrEmpty(_selectedFilePath))
     {
-        private readonly string _projectId;
-        private string _selectedFilePath;
-        private AnalyzeResult _lastAnalyzeResult;
+        MessageBox.Show("Please select a document first.",
+            "Validation",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+        return;
+    }
 
-        public KnowledgeCenterPage(string projectId = "")
+    try
+    {
+        // ---------------- UI: Analyzing state ----------------
+        AnalyzeButton.IsEnabled = false;
+        AnalyzeButton.Content = "Analyzing...";
+        PreviewTextBlock.Text = "Analyzing document, please wait...";
+
+        // 🔑 Force UI to update BEFORE async call
+        await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        using var client = new ApiClient();
+        client.SetBearer(Session.Token);
+
+        // ---------------- API CALL ----------------
+        var response = await client.PostFileAsync(
+            "analyze-document",
+            _selectedFilePath
+        );
+
+        var json = await response.Content.ReadAsStringAsync();
+
+        // ---------------- PREVIEW RAW RESPONSE ----------------
+        PreviewTextBlock.Text = json;
+
+        if (!response.IsSuccessStatusCode)
         {
-            InitializeComponent();
-            _projectId = projectId;
-        }
-
-        // =====================================================
-        // BROWSE FILE
-        // =====================================================
-        private void BrowseFile_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new OpenFileDialog
-            {
-                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
-            };
-
-            if (dialog.ShowDialog() == true)
-            {
-                _selectedFilePath = dialog.FileName;
-                SelectedFileText.Text = dialog.SafeFileName;
-            }
-        }
-
-        // =====================================================
-        // ANALYZE DOCUMENT
-        // =====================================================
-        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
-        {
-            if (string.IsNullOrEmpty(_selectedFilePath))
-            {
-                MessageBox.Show("Please select a document first.",
-                    "Validation",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            try
-            {
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                HttpResponseMessage response =
-                    await client.PostFileAsync("analyze-document", _selectedFilePath);
-
-                string json = await response.Content.ReadAsStringAsync();
-                System.Diagnostics.Debug.WriteLine(json);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    MessageBox.Show($"Analyze failed: {response.StatusCode}",
-                        "API Error",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                    return;
-                }
-
-                _lastAnalyzeResult = JsonSerializer.Deserialize<AnalyzeResult>(
-                    json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                if (_lastAnalyzeResult == null)
-                {
-                    MessageBox.Show("Unable to parse analysis result.",
-                        "Error",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                    return;
-                }
-
-                // Preview binding
-                UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories ?? new();
-                FlowList.ItemsSource = _lastAnalyzeResult.software_flow ?? new();
-                TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases ?? new();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine(ex);
-                MessageBox.Show(
-                    $"Unexpected error:\n{ex.Message}",
-                    "Error",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
-            }
-        }
-
-        // =====================================================
-        // SAVE DOCUMENT
-        // =====================================================
-        private void SaveDocument_Click(object sender, RoutedEventArgs e)
-        {
-            if (_lastAnalyzeResult == null)
-            {
-                MessageBox.Show("Analyze a document before saving.",
-                    "Validation",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            MessageBox.Show("✅ Document saved successfully",
-                "Saved",
+            MessageBox.Show(
+                $"Analyze failed: {response.StatusCode}",
+                "API Error",
                 MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                MessageBoxImage.Error
+            );
+            return;
         }
 
-        // =====================================================
-        // SIDEBAR NAVIGATION
-        // =====================================================
-        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
+        // ---------------- DESERIALIZE ----------------
+        _lastAnalyzeResult = JsonSerializer.Deserialize<AnalyzeResult>(
+            json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+        );
+
+        if (_lastAnalyzeResult == null)
         {
-            NavigationService?.Navigate(new DashboardPage(_projectId));
+            PreviewTextBlock.Text = "Unable to parse API response.";
+            return;
         }
 
-        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new UploadTestCasePage());
-        }
+        // ---------------- UPDATE TABS ----------------
+        UserStoriesList.ItemsSource = null;
+        FlowList.ItemsSource = null;
+        TestCasesGrid.ItemsSource = null;
 
-        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new AITestExecutorPage(_projectId));
-        }
-
-        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new ScriptGeneratorPage());
-        }
-
-        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new ExecutionLogPage());
-        }
-
-        // =====================================================
-        // UI MODELS
-        // =====================================================
-        private class AnalyzeResult
-        {
-            public List<string> user_stories { get; set; }
-            public List<string> software_flow { get; set; }
-            public List<TestCasePreview> test_cases { get; set; }
-        }
-
-        private class TestCasePreview
-        {
-            public string test_case_id { get; set; }
-            public string test_case_description { get; set; }
-
-            public string TestCaseId => test_case_id;
-            public string Description => test_case_description;
-        }
+        UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories ?? new();
+        FlowList.ItemsSource = _lastAnalyzeResult.software_flow ?? new();
+        TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases ?? new();
+    }
+    catch (Exception ex)
+    {
+        PreviewTextBlock.Text = $"Error:\n{ex}";
+        MessageBox.Show(
+            ex.Message,
+            "Unexpected Error",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error
+        );
+    }
+    finally
+    {
+        // ---------------- UI: Reset ----------------
+        AnalyzeButton.IsEnabled = true;
+        AnalyzeButton.Content = "Analyze";
     }
 }
