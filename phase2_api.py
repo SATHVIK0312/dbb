@@ -1,338 +1,292 @@
-<Page x:Class="JPMCGenAI_v1._0.KnowledgeCenterPage"
-      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-      Background="#FAF9F6"
-      Loaded="Page_Loaded">
+using Microsoft.Win32;
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using JPMCGenAI_v1._0.Services;
 
-    <Page.Resources>
-        <!-- === REUSED SIDEBAR STYLES === -->
-        <Style TargetType="Button" x:Key="SidebarButtonTheme">
-            <Setter Property="Background" Value="#FFF6EC"/>
-            <Setter Property="Foreground" Value="#333"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Width" Value="150"/>
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="BorderBrush" Value="#D4AF37"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="border" Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="10">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect BlurRadius="12" ShadowDepth="0" Opacity="0.35"/>
-                                    </Setter.Value>
-                                </Setter>
-                                <Setter TargetName="border" Property="Background" Value="#D4AF37"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+namespace JPMCGenAI_v1._0
+{
+    // Move data models outside the page class so they can be shared
+    public class UserStory
+    {
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string story { get; set; }
+    }
 
-        <Style TargetType="Button" x:Key="ActiveSidebarButtonTheme" BasedOn="{StaticResource SidebarButtonTheme}">
-            <Setter Property="IsEnabled" Value="False"/>
-            <Setter Property="Foreground" Value="#D4AF37"/>
-            <Setter Property="BorderBrush" Value="#D4AF37"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="#FFF6EC" BorderBrush="#D4AF37" CornerRadius="10" BorderThickness="0,0,0,3">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Page.Resources>
+    public class SoftwareFlow
+    {
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string step { get; set; }
+    }
 
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="240"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    public class TestCase
+    {
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string test_case_id { get; set; }
+        public string description { get; set; }
+        public string pre_req_id { get; set; }
+        public string pre_req_desc { get; set; }
+        public string tags { get; set; }
+        public string steps { get; set; }
+        public string arguments { get; set; }
+    }
 
-        <!-- ================= SIDEBAR ================= -->
-        <Border Grid.Column="0" 
-                Background="#F8F6F2" 
-                BorderBrush="#D4AF37" 
-                BorderThickness="0,0,2,0" 
-                CornerRadius="0,18,18,0">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.18"/>
-            </Border.Effect>
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+    public partial class KnowledgeCenterPage : Page
+    {
+        private readonly string _projectId;
+        private string _selectedFilePath;
 
-                <Border Background="#D4AF37" Padding="18" CornerRadius="0,18,0,0">
-                    <TextBlock Text="JPMC Flux" 
-                               Foreground="White" 
-                               FontSize="22" 
-                               FontWeight="Bold" 
-                               HorizontalAlignment="Center"/>
-                </Border>
+        public KnowledgeCenterPage(string projectId = "")
+        {
+            InitializeComponent();
+            _projectId = projectId;
+        }
 
-                <StackPanel Grid.Row="1" Margin="20,25,20,10">
-                    <Button Content="Project Dashboard" 
-                            Click="BackToDashboard_Click" 
-                            Style="{StaticResource SidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                    
-                    <Button Content="Manage Test Case" 
-                            Click="UploadTestCase_Click" 
-                            Style="{StaticResource SidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                    
-                    <Button Content="Smart Executor" 
-                            Click="AITestExecutor_Click" 
-                            Style="{StaticResource SidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                    
-                    <Button Content="Script Generator" 
-                            Click="ScriptGenerator_Click" 
-                            Style="{StaticResource SidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                    
-                    <Button Content="Knowledge Center" 
-                            Style="{StaticResource ActiveSidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                    
-                    <Button Content="Execution Log" 
-                            Click="ExecutionLog_Click" 
-                            Style="{StaticResource SidebarButtonTheme}" 
-                            Margin="0,0,0,12"/>
-                </StackPanel>
+        // ---------------- Page Load ----------------
+        private async void Page_Loaded(object sender, RoutedEventArgs e)
+        {
+            LoadProjectInfo();
+            await LoadAllKnowledgeData();
+        }
 
-                <Border Grid.Row="2" 
-                        Margin="15,20" 
-                        Padding="18" 
-                        Background="White" 
-                        CornerRadius="12" 
-                        BorderBrush="#E2E1DC" 
-                        BorderThickness="1">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="10" Opacity="0.15" ShadowDepth="2"/>
-                    </Border.Effect>
-                    <StackPanel>
-                        <TextBlock x:Name="ProjectTitleTextBlock" 
-                                   Foreground="#333" 
-                                   FontWeight="Bold" 
-                                   FontSize="20" 
-                                   Margin="0,0,0,5"/>
-                        <TextBlock x:Name="ProjectDetailsTextBlock" 
-                                   Foreground="#8C8575" 
-                                   FontSize="11"/>
-                        <Button Content="Change Project" 
-                                Style="{StaticResource SidebarButtonTheme}" 
-                                Click="ChangeProject_Click" 
-                                Margin="0,10,0,0"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </Border>
+        // ---------------- Load Project Info ----------------
+        private void LoadProjectInfo()
+        {
+            if (Session.CurrentProject != null)
+            {
+                ProjectTitleTextBlock.Text = Session.CurrentProject.project_name;
+                ProjectDetailsTextBlock.Text = $"ID: {Session.CurrentProject.projectid}";
+            }
+            else
+            {
+                ProjectTitleTextBlock.Text = "No Project";
+                ProjectDetailsTextBlock.Text = "Please select a project";
+            }
+        }
 
-        <!-- ================= MAIN CONTENT ================= -->
-        <Grid Grid.Column="1" Margin="25">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+        // ---------------- Load All Data ----------------
+        private async System.Threading.Tasks.Task LoadAllKnowledgeData()
+        {
+            try
+            {
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
 
-            <!-- Header -->
-            <StackPanel Grid.Row="0" Margin="0,0,0,20">
-                <TextBlock Text="Knowledge Center"
-                           FontSize="26"
-                           FontWeight="Bold"
-                           Foreground="#333"/>
-                <TextBlock Text="Upload documents and view extracted knowledge"
-                           Foreground="#8C8575"
-                           Margin="0,5,0,0"/>
-            </StackPanel>
+                HttpResponseMessage response = await client.GetAsync("knowledge-center/all-data");
+                string json = await response.Content.ReadAsStringAsync();
 
-            <!-- Upload Section -->
-            <Border Grid.Row="1"
-                    Background="White"
-                    BorderBrush="#D4AF37"
-                    BorderThickness="1"
-                    CornerRadius="8"
-                    Padding="20"
-                    Margin="0,0,0,20">
-                <StackPanel>
-                    <TextBlock Text="Upload New Document"
-                               FontSize="16"
-                               FontWeight="SemiBold"
-                               Foreground="#333"
-                               Margin="0,0,0,15"/>
-                    
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="SelectedFileText"
-                                   Text="No file selected"
-                                   Width="320"
-                                   VerticalAlignment="Center"
-                                   Foreground="#666"/>
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show($"Failed to load data: {response.StatusCode}");
+                    return;
+                }
 
-                        <Button Content="Browse"
-                                Width="100"
-                                Height="32"
-                                Margin="15,0"
-                                Click="BrowseFile_Click"/>
+                var result = JsonSerializer.Deserialize<KnowledgeCenterResponse>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
 
-                        <Button x:Name="AnalyzeButton"
-                                Content="Analyze"
-                                Width="120"
-                                Height="32"
-                                Background="#D4AF37"
-                                Foreground="White"
-                                FontWeight="SemiBold"
-                                Click="AnalyzeDocument_Click"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
+                if (result?.data != null)
+                {
+                    // Update counts
+                    UserStoriesCountText.Text = result.counts.user_stories.ToString();
+                    SoftwareFlowsCountText.Text = result.counts.software_flows.ToString();
+                    TestCasesCountText.Text = result.counts.test_cases.ToString();
 
-            <!-- Stats Cards -->
-            <Grid Grid.Row="2" Margin="0,0,0,20">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
+                    // Update grids
+                    UserStoriesGrid.ItemsSource = result.data.user_stories;
+                    SoftwareFlowsGrid.ItemsSource = result.data.software_flows;
+                    TestCasesGrid.ItemsSource = result.data.test_cases;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading knowledge data: {ex.Message}");
+            }
+        }
 
-                <!-- User Stories Count -->
-                <Border Grid.Column="0"
-                        Background="White"
-                        BorderBrush="#E2E1DC"
-                        BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="15"
-                        Margin="0,0,10,0">
-                    <StackPanel>
-                        <TextBlock Text="User Stories"
-                                   FontSize="14"
-                                   Foreground="#8C8575"
-                                   Margin="0,0,0,8"/>
-                        <TextBlock x:Name="UserStoriesCountText"
-                                   Text="0"
-                                   FontSize="32"
-                                   FontWeight="Bold"
-                                   Foreground="#D4AF37"/>
-                    </StackPanel>
-                </Border>
+        // ---------------- Browse ----------------
+        private void BrowseFile_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
+            };
 
-                <!-- Software Flows Count -->
-                <Border Grid.Column="1"
-                        Background="White"
-                        BorderBrush="#E2E1DC"
-                        BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="15"
-                        Margin="5,0">
-                    <StackPanel>
-                        <TextBlock Text="Software Flows"
-                                   FontSize="14"
-                                   Foreground="#8C8575"
-                                   Margin="0,0,0,8"/>
-                        <TextBlock x:Name="SoftwareFlowsCountText"
-                                   Text="0"
-                                   FontSize="32"
-                                   FontWeight="Bold"
-                                   Foreground="#D4AF37"/>
-                    </StackPanel>
-                </Border>
+            if (dlg.ShowDialog() == true)
+            {
+                _selectedFilePath = dlg.FileName;
+                SelectedFileText.Text = dlg.SafeFileName;
+            }
+        }
 
-                <!-- Test Cases Count -->
-                <Border Grid.Column="2"
-                        Background="White"
-                        BorderBrush="#E2E1DC"
-                        BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="15"
-                        Margin="10,0,0,0">
-                    <StackPanel>
-                        <TextBlock Text="Test Cases"
-                                   FontSize="14"
-                                   Foreground="#8C8575"
-                                   Margin="0,0,0,8"/>
-                        <TextBlock x:Name="TestCasesCountText"
-                                   Text="0"
-                                   FontSize="32"
-                                   FontWeight="Bold"
-                                   Foreground="#D4AF37"/>
-                    </StackPanel>
-                </Border>
-            </Grid>
+        // ---------------- Analyze ----------------
+        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_selectedFilePath))
+            {
+                MessageBox.Show("Please select a document first.");
+                return;
+            }
 
-            <!-- TABS -->
-            <TabControl Grid.Row="3"
-                        Background="White"
-                        BorderBrush="#E2E1DC"
-                        BorderThickness="1">
-                <TabItem Header="User Stories">
-                    <DataGrid x:Name="UserStoriesGrid"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              RowBackground="White"
-                              AlternatingRowBackground="#F9F9F9">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="ID" Binding="{Binding id}" Width="60"/>
-                            <DataGridTextColumn Header="Document ID" Binding="{Binding document_id}" Width="100"/>
-                            <DataGridTextColumn Header="Story" Binding="{Binding story}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </TabItem>
+            try
+            {
+                // UI state
+                AnalyzeButton.IsEnabled = false;
+                AnalyzeButton.Content = "Analyzing...";
 
-                <TabItem Header="Software Flows">
-                    <DataGrid x:Name="SoftwareFlowsGrid"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              RowBackground="White"
-                              AlternatingRowBackground="#F9F9F9">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="ID" Binding="{Binding id}" Width="60"/>
-                            <DataGridTextColumn Header="Document ID" Binding="{Binding document_id}" Width="100"/>
-                            <DataGridTextColumn Header="Step" Binding="{Binding step}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </TabItem>
+                // Force UI refresh
+                await Dispatcher.InvokeAsync(() => { });
 
-                <TabItem Header="Test Cases">
-                    <DataGrid x:Name="TestCasesGrid"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              GridLinesVisibility="Horizontal"
-                              HeadersVisibility="Column"
-                              RowBackground="White"
-                              AlternatingRowBackground="#F9F9F9">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="ID" Binding="{Binding id}" Width="50"/>
-                            <DataGridTextColumn Header="Test Case ID" Binding="{Binding test_case_id}" Width="100"/>
-                            <DataGridTextColumn Header="Description" Binding="{Binding description}" Width="250"/>
-                            <DataGridTextColumn Header="Tags" Binding="{Binding tags}" Width="100"/>
-                            <DataGridTextColumn Header="Arguments" Binding="{Binding arguments}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </TabItem>
-            </TabControl>
-        </Grid>
-    </Grid>
-</Page>
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
+
+                HttpResponseMessage response =
+                    await client.PostFileAsync("analyze-document", _selectedFilePath);
+
+                string json = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show($"Analyze failed: {response.StatusCode}\n{json}");
+                    return;
+                }
+
+                var analyzeResult = JsonSerializer.Deserialize<AnalyzeResponse>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                if (analyzeResult?.document_id == null)
+                {
+                    MessageBox.Show("Failed to parse analyze response.");
+                    return;
+                }
+
+                // Show popup with document details
+                await ShowDocumentDetailsPopup(analyzeResult.document_id);
+
+                // Reload main data
+                await LoadAllKnowledgeData();
+                
+                // Clear selection
+                _selectedFilePath = null;
+                SelectedFileText.Text = "No file selected";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}");
+            }
+            finally
+            {
+                AnalyzeButton.IsEnabled = true;
+                AnalyzeButton.Content = "Analyze";
+            }
+        }
+
+        // ---------------- Show Document Details Popup ----------------
+        private async System.Threading.Tasks.Task ShowDocumentDetailsPopup(int documentId)
+        {
+            try
+            {
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
+
+                // Fetch all details for the document
+                var userStoriesTask = client.GetAsync($"documents/{documentId}/user-stories");
+                var softwareFlowTask = client.GetAsync($"documents/{documentId}/software-flow");
+                var testCasesTask = client.GetAsync($"documents/{documentId}/test-cases");
+
+                await System.Threading.Tasks.Task.WhenAll(userStoriesTask, softwareFlowTask, testCasesTask);
+
+                var userStoriesJson = await userStoriesTask.Result.Content.ReadAsStringAsync();
+                var softwareFlowJson = await softwareFlowTask.Result.Content.ReadAsStringAsync();
+                var testCasesJson = await testCasesTask.Result.Content.ReadAsStringAsync();
+
+                var userStories = JsonSerializer.Deserialize<List<UserStory>>(
+                    userStoriesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                var softwareFlows = JsonSerializer.Deserialize<List<SoftwareFlow>>(
+                    softwareFlowJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                var testCases = JsonSerializer.Deserialize<List<TestCase>>(
+                    testCasesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                // Show popup window
+                var popup = new DocumentDetailsWindow(documentId, userStories, softwareFlows, testCases);
+                popup.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading document details: {ex.Message}");
+            }
+        }
+
+        // =====================================================================
+        // NAVIGATION
+        // =====================================================================
+        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(Session.CurrentProject != null
+                ? new DashboardPage(Session.CurrentProject.projectid)
+                : new ProjectPage());
+
+        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(Session.CurrentProject != null
+                ? new AITestExecutorPage(Session.CurrentProject.projectid)
+                : new ProjectPage());
+
+        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(new ScriptGeneratorPage());
+
+        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(new UploadTestCasePage());
+
+        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(new ExecutionLogPage());
+
+        private void ChangeProject_Click(object sender, RoutedEventArgs e)
+            => NavigationService?.Navigate(new ProjectPage());
+
+        // ---------------- RESPONSE MODELS ----------------
+        
+        private class KnowledgeCenterResponse
+        {
+            public string status { get; set; }
+            public CountsData counts { get; set; }
+            public AllData data { get; set; }
+        }
+
+        private class CountsData
+        {
+            public int user_stories { get; set; }
+            public int software_flows { get; set; }
+            public int test_cases { get; set; }
+        }
+
+        private class AllData
+        {
+            public List<UserStory> user_stories { get; set; }
+            public List<SoftwareFlow> software_flows { get; set; }
+            public List<TestCase> test_cases { get; set; }
+        }
+
+        private class AnalyzeResponse
+        {
+            public string status { get; set; }
+            public int document_id { get; set; }
+            public string message { get; set; }
+        }
+    }
+}
