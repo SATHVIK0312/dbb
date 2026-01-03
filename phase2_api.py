@@ -1,115 +1,111 @@
-<Button x:Name="AnalyzeButton"
-        Content="Analyze"
-        Width="100"
-        Background="#D4AF37"
-        Foreground="White"
-        Click="AnalyzeDocument_Click"/>
+@app.get("/knowledge-center/data")
+async def load_knowledge_center_data(
+    document_id: int = Query(..., description="Analyzed document ID")
+):
+    conn = await get_db_connection()
 
+    try:
+        # ---------------------------
+        # USER STORIES
+        # ---------------------------
+        user_stories = []
+        async with conn.execute(
+            """
+            SELECT story_id, feature, goal, description
+            FROM user_stories
+            WHERE document_id = ?
+            """,
+            (document_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            for r in rows:
+                user_stories.append({
+                    "story_id": r["story_id"],
+                    "feature": r["feature"],
+                    "goal": r["goal"],
+                    "description": r["description"]
+                })
 
+        # ---------------------------
+        # SOFTWARE FLOWS
+        # ---------------------------
+        flows = []
+        async with conn.execute(
+            """
+            SELECT flow_id, title, steps
+            FROM software_flows
+            WHERE document_id = ?
+            """,
+            (document_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            for r in rows:
+                flows.append({
+                    "flow_id": r["flow_id"],
+                    "title": r["title"],
+                    "steps": r["steps"].split("\n")
+                })
 
-<!-- RAW API PREVIEW -->
-<Border Grid.Row="2"
-        Background="White"
-        BorderBrush="#E2E1DC"
-        BorderThickness="1"
-        CornerRadius="8"
-        Padding="10"
-        Margin="0,0,0,10">
+        # ---------------------------
+        # TEST CASES + STEPS
+        # ---------------------------
+        test_cases = []
+        async with conn.execute(
+            """
+            SELECT
+                test_case_id,
+                test_case_code,
+                description,
+                pre_req_test_id,
+                pre_req_description,
+                tags,
+                arguments
+            FROM test_cases
+            WHERE document_id = ?
+            ORDER BY test_case_id
+            """,
+            (document_id,)
+        ) as cursor:
+            tc_rows = await cursor.fetchall()
 
-    <ScrollViewer Height="140">
-        <TextBlock x:Name="PreviewTextBlock"
-                   Text="Preview will appear here after analysis..."
-                   TextWrapping="Wrap"
-                   Foreground="#444"
-                   FontFamily="Consolas"
-                   FontSize="12"/>
-    </ScrollViewer>
-</Border>
+            for tc in tc_rows:
+                # Fetch steps per test case
+                steps = []
+                async with conn.execute(
+                    """
+                    SELECT step_no, step_description
+                    FROM test_case_steps
+                    WHERE test_case_id = ?
+                    ORDER BY step_no
+                    """,
+                    (tc["test_case_id"],)
+                ) as step_cursor:
+                    step_rows = await step_cursor.fetchall()
+                    for s in step_rows:
+                        steps.append({
+                            "step_no": s["step_no"],
+                            "step_description": s["step_description"]
+                        })
 
+                test_cases.append({
+                    "test_case_id": tc["test_case_code"],   # GTC00X
+                    "description": tc["description"],
+                    "pre_requisite_test_id": tc["pre_req_test_id"],
+                    "pre_requisite_description": tc["pre_req_description"],
+                    "tags": tc["tags"].split(",") if tc["tags"] else [],
+                    "arguments": tc["arguments"],
+                    "steps": steps
+                })
 
-
-
-private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
-{
-    if (string.IsNullOrEmpty(_selectedFilePath))
-    {
-        MessageBox.Show("Please select a document first.",
-            "Validation",
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
-        return;
-    }
-
-    try
-    {
-        // ---------------- UI: Analyzing state ----------------
-        AnalyzeButton.IsEnabled = false;
-        AnalyzeButton.Content = "Analyzing...";
-        PreviewTextBlock.Text = "Analyzing document, please wait...";
-
-        // 🔑 Force UI to update BEFORE async call
-        await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
-
-        using var client = new ApiClient();
-        client.SetBearer(Session.Token);
-
-        // ---------------- API CALL ----------------
-        var response = await client.PostFileAsync(
-            "analyze-document",
-            _selectedFilePath
-        );
-
-        var json = await response.Content.ReadAsStringAsync();
-
-        // ---------------- PREVIEW RAW RESPONSE ----------------
-        PreviewTextBlock.Text = json;
-
-        if (!response.IsSuccessStatusCode)
-        {
-            MessageBox.Show(
-                $"Analyze failed: {response.StatusCode}",
-                "API Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error
-            );
-            return;
+        return {
+            "document_id": document_id,
+            "user_stories": user_stories,
+            "flows": flows,
+            "test_cases": test_cases
         }
 
-        // ---------------- DESERIALIZE ----------------
-        _lastAnalyzeResult = JsonSerializer.Deserialize<AnalyzeResult>(
-            json,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-        );
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        if (_lastAnalyzeResult == null)
-        {
-            PreviewTextBlock.Text = "Unable to parse API response.";
-            return;
-        }
-
-        // ---------------- UPDATE TABS ----------------
-        UserStoriesList.ItemsSource = null;
-        FlowList.ItemsSource = null;
-        TestCasesGrid.ItemsSource = null;
-
-        UserStoriesList.ItemsSource = _lastAnalyzeResult.user_stories ?? new();
-        FlowList.ItemsSource = _lastAnalyzeResult.software_flow ?? new();
-        TestCasesGrid.ItemsSource = _lastAnalyzeResult.test_cases ?? new();
-    }
-    catch (Exception ex)
-    {
-        PreviewTextBlock.Text = $"Error:\n{ex}";
-        MessageBox.Show(
-            ex.Message,
-            "Unexpected Error",
-            MessageBoxButton.OK,
-            MessageBoxImage.Error
-        );
-    }
-    finally
-    {
-        // ---------------- UI: Reset ----------------
-        AnalyzeButton.IsEnabled = true;
-        AnalyzeButton.Content = "Analyze";
-    }
-}
+    finally:
+        await conn.close()
