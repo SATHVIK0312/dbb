@@ -1,69 +1,273 @@
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
-using static JPMCGenAI_v1._0.KnowledgeCenterPage;
+using System.Windows.Controls;
+using JPMCGenAI_v1._0.Services;
 
 namespace JPMCGenAI_v1._0
 {
-    public partial class DocumentDetailsWindow : Window
+    // Move data models outside the page class so they can be shared
+    public class UserStory
     {
-        private readonly int _documentId;
-        private readonly List<UserStory> _userStories;
-        private readonly List<SoftwareFlow> _softwareFlows;
-        private readonly List<TestCase> _testCases;
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string story { get; set; }
+    }
 
-        public DocumentDetailsWindow(
-            int documentId,
-            List<UserStory> userStories,
-            List<SoftwareFlow> softwareFlows,
-            List<TestCase> testCases)
+    public class SoftwareFlow
+    {
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string step { get; set; }
+    }
+
+    public class TestCase
+    {
+        public int id { get; set; }
+        public int document_id { get; set; }
+        public string test_case_id { get; set; }
+        public string description { get; set; }
+        public string pre_req_id { get; set; }
+        public string pre_req_desc { get; set; }
+        public string tags { get; set; }
+        public string steps { get; set; }
+        public string arguments { get; set; }
+    }
+
+    public partial class KnowledgeCenterPage : Page
+    {
+        private readonly string _projectId;
+        private string _selectedFilePath;
+
+        public KnowledgeCenterPage(string projectId = "")
         {
             InitializeComponent();
-
-            _documentId = documentId;
-            _userStories = userStories ?? new List<UserStory>();
-            _softwareFlows = softwareFlows ?? new List<SoftwareFlow>();
-            _testCases = testCases ?? new List<TestCase>();
-
-            LoadData();
+            _projectId = projectId;
         }
 
-        private void LoadData()
+        // ---------------- Page Load ----------------
+        private async void Page_Loaded(object sender, RoutedEventArgs e)
         {
-            // Set document ID
-            DocumentIdText.Text = $"Document ID: {_documentId}";
-
-            // Set counts
-            UserStoriesCountText.Text = _userStories.Count.ToString();
-            SoftwareFlowsCountText.Text = _softwareFlows.Count.ToString();
-            TestCasesCountText.Text = _testCases.Count.ToString();
-
-            // Bind data to grids
-            UserStoriesGrid.ItemsSource = _userStories;
-            SoftwareFlowsGrid.ItemsSource = _softwareFlows;
-            TestCasesList.ItemsSource = _testCases;
+            await LoadAllKnowledgeData();
         }
 
-        private void SaveToKnowledgeBase_Click(object sender, RoutedEventArgs e)
+        // ---------------- Load All Data ----------------
+        private async System.Threading.Tasks.Task LoadAllKnowledgeData()
         {
-            MessageBox.Show(
-                $"Successfully saved to Knowledge Base!\n\n" +
-                $"User Stories: {_userStories.Count}\n" +
-                $"Software Flows: {_softwareFlows.Count}\n" +
-                $"Test Cases: {_testCases.Count}",
-                "Success",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information
-            );
+            try
+            {
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
 
-            this.DialogResult = true;
-            this.Close();
+                HttpResponseMessage response = await client.GetAsync("knowledge-center/all-data");
+                string json = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show($"Failed to load data: {response.StatusCode}");
+                    return;
+                }
+
+                var result = JsonSerializer.Deserialize<KnowledgeCenterResponse>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                if (result?.data != null)
+                {
+                    // Update counts
+                    UserStoriesCountText.Text = result.counts.user_stories.ToString();
+                    SoftwareFlowsCountText.Text = result.counts.software_flows.ToString();
+                    TestCasesCountText.Text = result.counts.test_cases.ToString();
+
+                    // Update grids
+                    UserStoriesGrid.ItemsSource = result.data.user_stories;
+                    SoftwareFlowsGrid.ItemsSource = result.data.software_flows;
+                    TestCasesGrid.ItemsSource = result.data.test_cases;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading knowledge data: {ex.Message}");
+            }
         }
 
-        private void Close_Click(object sender, RoutedEventArgs e)
+        // ---------------- Browse ----------------
+        private void BrowseFile_Click(object sender, RoutedEventArgs e)
         {
-            this.DialogResult = false;
-            this.Close();
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
+            };
+
+            if (dlg.ShowDialog() == true)
+            {
+                _selectedFilePath = dlg.FileName;
+                SelectedFileText.Text = dlg.SafeFileName;
+            }
+        }
+
+        // ---------------- Analyze ----------------
+        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_selectedFilePath))
+            {
+                MessageBox.Show("Please select a document first.");
+                return;
+            }
+
+            try
+            {
+                // UI state
+                AnalyzeButton.IsEnabled = false;
+                AnalyzeButton.Content = "Analyzing...";
+
+                // Force UI refresh
+                await Dispatcher.InvokeAsync(() => { });
+
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
+
+                HttpResponseMessage response =
+                    await client.PostFileAsync("analyze-document", _selectedFilePath);
+
+                string json = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    MessageBox.Show($"Analyze failed: {response.StatusCode}\n{json}");
+                    return;
+                }
+
+                var analyzeResult = JsonSerializer.Deserialize<AnalyzeResponse>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                if (analyzeResult?.document_id == null)
+                {
+                    MessageBox.Show("Failed to parse analyze response.");
+                    return;
+                }
+
+                // Show popup with document details
+                await ShowDocumentDetailsPopup(analyzeResult.document_id);
+
+                // Reload main data
+                await LoadAllKnowledgeData();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}");
+            }
+            finally
+            {
+                AnalyzeButton.IsEnabled = true;
+                AnalyzeButton.Content = "Analyze";
+            }
+        }
+
+        // ---------------- Show Document Details Popup ----------------
+        private async System.Threading.Tasks.Task ShowDocumentDetailsPopup(int documentId)
+        {
+            try
+            {
+                using var client = new ApiClient();
+                client.SetBearer(Session.Token);
+
+                // Fetch all details for the document
+                var userStoriesTask = client.GetAsync($"documents/{documentId}/user-stories");
+                var softwareFlowTask = client.GetAsync($"documents/{documentId}/software-flow");
+                var testCasesTask = client.GetAsync($"documents/{documentId}/test-cases");
+
+                await System.Threading.Tasks.Task.WhenAll(userStoriesTask, softwareFlowTask, testCasesTask);
+
+                var userStoriesJson = await userStoriesTask.Result.Content.ReadAsStringAsync();
+                var softwareFlowJson = await softwareFlowTask.Result.Content.ReadAsStringAsync();
+                var testCasesJson = await testCasesTask.Result.Content.ReadAsStringAsync();
+
+                var userStories = JsonSerializer.Deserialize<List<UserStory>>(
+                    userStoriesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                var softwareFlows = JsonSerializer.Deserialize<List<SoftwareFlow>>(
+                    softwareFlowJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                var testCases = JsonSerializer.Deserialize<List<TestCase>>(
+                    testCasesJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+
+                // Show popup window
+                var popup = new DocumentDetailsWindow(documentId, userStories, softwareFlows, testCases);
+                popup.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading document details: {ex.Message}");
+            }
+        }
+
+        // ---------------- Navigation ----------------
+        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new DashboardPage(_projectId));
+        }
+
+        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new UploadTestCasePage());
+        }
+
+        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new AITestExecutorPage(_projectId));
+        }
+
+        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ScriptGeneratorPage());
+        }
+
+        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
+        {
+            NavigationService?.Navigate(new ExecutionLogPage());
+        }
+
+        // ---------------- RESPONSE MODELS ----------------
+        
+        private class KnowledgeCenterResponse
+        {
+            public string status { get; set; }
+            public CountsData counts { get; set; }
+            public AllData data { get; set; }
+        }
+
+        private class CountsData
+        {
+            public int user_stories { get; set; }
+            public int software_flows { get; set; }
+            public int test_cases { get; set; }
+        }
+
+        private class AllData
+        {
+            public List<UserStory> user_stories { get; set; }
+            public List<SoftwareFlow> software_flows { get; set; }
+            public List<TestCase> test_cases { get; set; }
+        }
+
+        private class AnalyzeResponse
+        {
+            public string status { get; set; }
+            public int document_id { get; set; }
+            public string message { get; set; }
         }
     }
 }
