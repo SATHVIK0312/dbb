@@ -1,272 +1,268 @@
-using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Text.Json;
-using System.Windows;
-using System.Windows.Controls;
-using JPMCGenAI_v1._0.Services;
+<Window x:Class="JPMCGenAI_v1._0.DocumentDetailsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Document Analysis Results"
+        Height="700"
+        Width="1100"
+        WindowStartupLocation="CenterScreen"
+        Background="#FAF9F6">
 
-namespace JPMCGenAI_v1._0
-{
-    public partial class KnowledgeCenterPage : Page
-    {
-        private readonly string _projectId;
-        private string _selectedFilePath;
+    <Grid Margin="25">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        public KnowledgeCenterPage(string projectId = "")
-        {
-            InitializeComponent();
-            _projectId = projectId;
-        }
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Document Analysis Complete"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       Foreground="#333"/>
+            <TextBlock x:Name="DocumentIdText"
+                       Text="Document ID: --"
+                       FontSize="14"
+                       Foreground="#8C8575"
+                       Margin="0,5,0,0"/>
+        </StackPanel>
 
-        // ---------------- Page Load ----------------
-        private async void Page_Loaded(object sender, RoutedEventArgs e)
-        {
-            await LoadAllKnowledgeData();
-        }
+        <!-- Stats Cards -->
+        <Grid Grid.Row="1" Margin="0,0,0,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        // ---------------- Load All Data ----------------
-        private async System.Threading.Tasks.Task LoadAllKnowledgeData()
-        {
-            try
-            {
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
+            <!-- User Stories Count -->
+            <Border Grid.Column="0"
+                    Background="White"
+                    BorderBrush="#D4AF37"
+                    BorderThickness="2"
+                    CornerRadius="8"
+                    Padding="15"
+                    Margin="0,0,10,0">
+                <StackPanel>
+                    <TextBlock Text="User Stories Created"
+                               FontSize="13"
+                               Foreground="#8C8575"
+                               Margin="0,0,0,8"/>
+                    <TextBlock x:Name="UserStoriesCountText"
+                               Text="0"
+                               FontSize="28"
+                               FontWeight="Bold"
+                               Foreground="#D4AF37"/>
+                </StackPanel>
+            </Border>
 
-                HttpResponseMessage response = await client.GetAsync("knowledge-center/all-data");
-                string json = await response.Content.ReadAsStringAsync();
+            <!-- Software Flows Count -->
+            <Border Grid.Column="1"
+                    Background="White"
+                    BorderBrush="#D4AF37"
+                    BorderThickness="2"
+                    CornerRadius="8"
+                    Padding="15"
+                    Margin="5,0">
+                <StackPanel>
+                    <TextBlock Text="Software Flows Created"
+                               FontSize="13"
+                               Foreground="#8C8575"
+                               Margin="0,0,0,8"/>
+                    <TextBlock x:Name="SoftwareFlowsCountText"
+                               Text="0"
+                               FontSize="28"
+                               FontWeight="Bold"
+                               Foreground="#D4AF37"/>
+                </StackPanel>
+            </Border>
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    MessageBox.Show($"Failed to load data: {response.StatusCode}");
-                    return;
-                }
+            <!-- Test Cases Count -->
+            <Border Grid.Column="2"
+                    Background="White"
+                    BorderBrush="#D4AF37"
+                    BorderThickness="2"
+                    CornerRadius="8"
+                    Padding="15"
+                    Margin="10,0,0,0">
+                <StackPanel>
+                    <TextBlock Text="Test Cases Created"
+                               FontSize="13"
+                               Foreground="#8C8575"
+                               Margin="0,0,0,8"/>
+                    <TextBlock x:Name="TestCasesCountText"
+                               Text="0"
+                               FontSize="28"
+                               FontWeight="Bold"
+                               Foreground="#D4AF37"/>
+                </StackPanel>
+            </Border>
+        </Grid>
 
-                var result = JsonSerializer.Deserialize<KnowledgeCenterResponse>(
-                    json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
+        <!-- Tabs -->
+        <TabControl Grid.Row="2"
+                    Background="White"
+                    BorderBrush="#E2E1DC"
+                    BorderThickness="1">
+            
+            <TabItem Header="User Stories">
+                <Grid>
+                    <DataGrid x:Name="UserStoriesGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              RowBackground="White"
+                              AlternatingRowBackground="#F9F9F9"
+                              CanUserResizeRows="False"
+                              SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" 
+                                                Binding="{Binding id}" 
+                                                Width="60"/>
+                            <DataGridTextColumn Header="Story" 
+                                                Binding="{Binding story}" 
+                                                Width="*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                        <Setter Property="Padding" Value="5"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
 
-                if (result?.data != null)
-                {
-                    // Update counts
-                    UserStoriesCountText.Text = result.counts.user_stories.ToString();
-                    SoftwareFlowsCountText.Text = result.counts.software_flows.ToString();
-                    TestCasesCountText.Text = result.counts.test_cases.ToString();
+            <TabItem Header="Software Flows">
+                <Grid>
+                    <DataGrid x:Name="SoftwareFlowsGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              RowBackground="White"
+                              AlternatingRowBackground="#F9F9F9"
+                              CanUserResizeRows="False"
+                              SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" 
+                                                Binding="{Binding id}" 
+                                                Width="60"/>
+                            <DataGridTextColumn Header="Step" 
+                                                Binding="{Binding step}" 
+                                                Width="*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                        <Setter Property="Padding" Value="5"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
 
-                    // Update grids
-                    UserStoriesGrid.ItemsSource = result.data.user_stories;
-                    SoftwareFlowsGrid.ItemsSource = result.data.software_flows;
-                    TestCasesGrid.ItemsSource = result.data.test_cases;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error loading knowledge data: {ex.Message}");
-            }
-        }
+            <TabItem Header="Test Cases">
+                <Grid>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="TestCasesList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="White"
+                                            BorderBrush="#E2E1DC"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Margin="10"
+                                            Padding="15">
+                                        <StackPanel>
+                                            <Grid Margin="0,0,0,10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding test_case_id}"
+                                                           FontSize="16"
+                                                           FontWeight="Bold"
+                                                           Foreground="#D4AF37"/>
+                                                
+                                                <Border Grid.Column="1"
+                                                        Background="#F0F0F0"
+                                                        CornerRadius="4"
+                                                        Padding="6,2"
+                                                        HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding tags}"
+                                                               FontSize="11"
+                                                               Foreground="#666"/>
+                                                </Border>
+                                            </Grid>
 
-        // ---------------- Browse ----------------
-        private void BrowseFile_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new OpenFileDialog
-            {
-                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
-            };
+                                            <TextBlock Text="{Binding description}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="14"
+                                                       Foreground="#333"
+                                                       Margin="0,0,0,10"/>
 
-            if (dlg.ShowDialog() == true)
-            {
-                _selectedFilePath = dlg.FileName;
-                SelectedFileText.Text = dlg.SafeFileName;
-            }
-        }
+                                            <Separator Margin="0,5"/>
 
-        // ---------------- Analyze ----------------
-        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
-        {
-            if (string.IsNullOrEmpty(_selectedFilePath))
-            {
-                MessageBox.Show("Please select a document first.");
-                return;
-            }
+                                            <TextBlock Text="Prerequisites:"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Margin="0,10,0,5"/>
+                                            <TextBlock Text="{Binding pre_req_desc}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="#666"
+                                                       Margin="0,0,0,10"/>
 
-            try
-            {
-                // UI state
-                AnalyzeButton.IsEnabled = false;
-                AnalyzeButton.Content = "Analyzing...";
+                                            <TextBlock Text="Steps:"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Margin="0,5,0,5"/>
+                                            <TextBlock Text="{Binding steps}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="#666"
+                                                       Margin="0,0,0,10"/>
 
-                // Force UI refresh
-                await Dispatcher.InvokeAsync(() => { });
+                                            <TextBlock Text="Arguments:"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Margin="0,5,0,5"/>
+                                            <TextBlock Text="{Binding arguments}"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="#666"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+        </TabControl>
 
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                HttpResponseMessage response =
-                    await client.PostFileAsync("analyze-document", _selectedFilePath);
-
-                string json = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    MessageBox.Show($"Analyze failed: {response.StatusCode}\n{json}");
-                    return;
-                }
-
-                var analyzeResult = JsonSerializer.Deserialize<AnalyzeResponse>(
-                    json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                if (analyzeResult?.document_id == null)
-                {
-                    MessageBox.Show("Failed to parse analyze response.");
-                    return;
-                }
-
-                // Show popup with document details
-                await ShowDocumentDetailsPopup(analyzeResult.document_id);
-
-                // Reload main data
-                await LoadAllKnowledgeData();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error: {ex.Message}");
-            }
-            finally
-            {
-                AnalyzeButton.IsEnabled = true;
-                AnalyzeButton.Content = "Analyze";
-            }
-        }
-
-        // ---------------- Show Document Details Popup ----------------
-        private async System.Threading.Tasks.Task ShowDocumentDetailsPopup(int documentId)
-        {
-            try
-            {
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                // Fetch all details for the document
-                var userStoriesTask = client.GetAsync($"documents/{documentId}/user-stories");
-                var softwareFlowTask = client.GetAsync($"documents/{documentId}/software-flow");
-                var testCasesTask = client.GetAsync($"documents/{documentId}/test-cases");
-
-                await System.Threading.Tasks.Task.WhenAll(userStoriesTask, softwareFlowTask, testCasesTask);
-
-                var userStoriesJson = await userStoriesTask.Result.Content.ReadAsStringAsync();
-                var softwareFlowJson = await softwareFlowTask.Result.Content.ReadAsStringAsync();
-                var testCasesJson = await testCasesTask.Result.Content.ReadAsStringAsync();
-
-                var userStories = JsonSerializer.Deserialize<List<UserStory>>(
-                    userStoriesJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                var softwareFlows = JsonSerializer.Deserialize<List<SoftwareFlow>>(
-                    softwareFlowJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                var testCases = JsonSerializer.Deserialize<List<TestCase>>(
-                    testCasesJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                // Show popup window
-                var popup = new DocumentDetailsWindow(documentId, userStories, softwareFlows, testCases);
-                popup.ShowDialog();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error loading document details: {ex.Message}");
-            }
-        }
-
-        // ---------------- Navigation ----------------
-        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new DashboardPage(_projectId));
-        }
-
-        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new UploadTestCasePage());
-        }
-
-        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new AITestExecutorPage(_projectId));
-        }
-
-        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new ScriptGeneratorPage());
-        }
-
-        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService?.Navigate(new ExecutionLogPage());
-        }
-
-        // ---------------- DATA MODELS ----------------
-        
-        private class KnowledgeCenterResponse
-        {
-            public string status { get; set; }
-            public CountsData counts { get; set; }
-            public AllData data { get; set; }
-        }
-
-        private class CountsData
-        {
-            public int user_stories { get; set; }
-            public int software_flows { get; set; }
-            public int test_cases { get; set; }
-        }
-
-        private class AllData
-        {
-            public List<UserStory> user_stories { get; set; }
-            public List<SoftwareFlow> software_flows { get; set; }
-            public List<TestCase> test_cases { get; set; }
-        }
-
-        public class UserStory
-        {
-            public int id { get; set; }
-            public int document_id { get; set; }
-            public string story { get; set; }
-        }
-
-        public class SoftwareFlow
-        {
-            public int id { get; set; }
-            public int document_id { get; set; }
-            public string step { get; set; }
-        }
-
-        public class TestCase
-        {
-            public int id { get; set; }
-            public int document_id { get; set; }
-            public string test_case_id { get; set; }
-            public string description { get; set; }
-            public string pre_req_id { get; set; }
-            public string pre_req_desc { get; set; }
-            public string tags { get; set; }
-            public string steps { get; set; }
-            public string arguments { get; set; }
-        }
-
-        private class AnalyzeResponse
-        {
-            public string status { get; set; }
-            public int document_id { get; set; }
-            public string message { get; set; }
-        }
-    }
-}
+        <!-- Bottom Buttons -->
+        <StackPanel Grid.Row="3"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Content="Save to Knowledge Base"
+                    Width="180"
+                    Height="36"
+                    Background="#D4AF37"
+                    Foreground="White"
+                    FontWeight="SemiBold"
+                    Margin="0,0,10,0"
+                    Click="SaveToKnowledgeBase_Click"/>
+            
+            <Button Content="Close"
+                    Width="100"
+                    Height="36"
+                    Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
