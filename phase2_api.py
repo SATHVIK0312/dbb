@@ -1,111 +1,78 @@
-@app.get("/knowledge-center/data")
-async def load_knowledge_center_data(
-    document_id: int = Query(..., description="Analyzed document ID")
-):
+from fastapi import FastAPI
+import aiosqlite
+
+app = FastAPI()
+
+DB_URL = "your_sqlite_db_path.db"
+
+
+# ✅ Your existing async DB connector
+async def get_db_connection():
+    conn = await aiosqlite.connect(DB_URL)
+    conn.row_factory = aiosqlite.Row
+    return conn
+
+
+# ============================================================
+# 🔥 LOAD ALL KNOWLEDGE CENTER DATA (NO INPUT)
+# ============================================================
+@app.get("/knowledge-center/all-data")
+async def load_all_knowledge_center_data():
     conn = await get_db_connection()
 
     try:
-        # ---------------------------
-        # USER STORIES
-        # ---------------------------
-        user_stories = []
+        # ---------------- USER STORIES ----------------
         async with conn.execute(
             """
-            SELECT story_id, feature, goal, description
+            SELECT id, document_id, story
             FROM user_stories
-            WHERE document_id = ?
-            """,
-            (document_id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            for r in rows:
-                user_stories.append({
-                    "story_id": r["story_id"],
-                    "feature": r["feature"],
-                    "goal": r["goal"],
-                    "description": r["description"]
-                })
+            ORDER BY document_id, id
+            """
+        ) as cur:
+            user_stories = [dict(row) async for row in cur]
 
-        # ---------------------------
-        # SOFTWARE FLOWS
-        # ---------------------------
-        flows = []
+        # ---------------- SOFTWARE FLOWS ----------------
         async with conn.execute(
             """
-            SELECT flow_id, title, steps
-            FROM software_flows
-            WHERE document_id = ?
-            """,
-            (document_id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            for r in rows:
-                flows.append({
-                    "flow_id": r["flow_id"],
-                    "title": r["title"],
-                    "steps": r["steps"].split("\n")
-                })
+            SELECT id, document_id, step
+            FROM software_flow
+            ORDER BY document_id, id
+            """
+        ) as cur:
+            software_flows = [dict(row) async for row in cur]
 
-        # ---------------------------
-        # TEST CASES + STEPS
-        # ---------------------------
-        test_cases = []
+        # ---------------- TEST CASES ----------------
         async with conn.execute(
             """
             SELECT
+                id,
+                document_id,
                 test_case_id,
-                test_case_code,
                 description,
-                pre_req_test_id,
-                pre_req_description,
+                pre_req_id,
+                pre_req_desc,
                 tags,
+                steps,
                 arguments
             FROM test_cases
-            WHERE document_id = ?
-            ORDER BY test_case_id
-            """,
-            (document_id,)
-        ) as cursor:
-            tc_rows = await cursor.fetchall()
-
-            for tc in tc_rows:
-                # Fetch steps per test case
-                steps = []
-                async with conn.execute(
-                    """
-                    SELECT step_no, step_description
-                    FROM test_case_steps
-                    WHERE test_case_id = ?
-                    ORDER BY step_no
-                    """,
-                    (tc["test_case_id"],)
-                ) as step_cursor:
-                    step_rows = await step_cursor.fetchall()
-                    for s in step_rows:
-                        steps.append({
-                            "step_no": s["step_no"],
-                            "step_description": s["step_description"]
-                        })
-
-                test_cases.append({
-                    "test_case_id": tc["test_case_code"],   # GTC00X
-                    "description": tc["description"],
-                    "pre_requisite_test_id": tc["pre_req_test_id"],
-                    "pre_requisite_description": tc["pre_req_description"],
-                    "tags": tc["tags"].split(",") if tc["tags"] else [],
-                    "arguments": tc["arguments"],
-                    "steps": steps
-                })
+            ORDER BY document_id, id
+            """
+        ) as cur:
+            test_cases = [dict(row) async for row in cur]
 
         return {
-            "document_id": document_id,
-            "user_stories": user_stories,
-            "flows": flows,
-            "test_cases": test_cases
+            "status": "success",
+            "counts": {
+                "user_stories": len(user_stories),
+                "software_flows": len(software_flows),
+                "test_cases": len(test_cases),
+            },
+            "data": {
+                "user_stories": user_stories,
+                "software_flows": software_flows,
+                "test_cases": test_cases,
+            },
         }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
     finally:
         await conn.close()
