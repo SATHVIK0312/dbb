@@ -1,3 +1,6 @@
+//input[@type='radio' and contains(@id,'answer2') and not(@disabled)]
+
+
 elif action_type == "RADIO":
     step_lower = step_name.lower()
 
