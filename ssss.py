@@ -1,49 +1,51 @@
 //input[@type='radio' and contains(@id,'answer2') and not(@disabled)]
+//input[@id='claimsPageForm.erbeAnswerPanelData.answer2']
 
 
 elif action_type == "RADIO":
     step_lower = step_name.lower()
 
-    # 1. Extract answer number
-    match = re.search(r"answer\s*=\s*(\d+)", step_lower)
-    if not match:
-        raise RuntimeError("RADIO step must specify answer = 1 or 2")
+    # HARD extract answer
+    if "answer = 1" in step_lower:
+        radio_id = "claimsPageForm.erbeAnswerPanelData.answer1"
+    elif "answer = 2" in step_lower:
+        radio_id = "claimsPageForm.erbeAnswerPanelData.answer2"
+    else:
+        raise RuntimeError("RADIO step must specify answer = 1 or answer = 2")
 
-    answer_index = match.group(1)
-
-    # 2. Resolve frames
+    # Resolve frames
     nav_frame, content_frame = resolve_ccs_frames(page)
 
-    # 3. DOM-level click (NO scroll, NO Playwright click)
+    # HARD XPath
+    radio_xpath = f"//input[@id='{radio_id}']"
+
+    # HARD DOM CLICK — NO SCROLL, NO WAIT, NO PLAYWRIGHT CLICK
     clicked = await content_frame.evaluate(
         """
-        (answerIndex) => {
-            const radios = Array.from(
-                document.querySelectorAll(
-                    `input[type='radio'][id*='answer${answerIndex}']`
-                )
-            );
+        (xp) => {
+            const r = document.evaluate(
+                xp,
+                document,
+                null,
+                XPathResult.FIRST_ORDERED_NODE_TYPE,
+                null
+            ).singleNodeValue;
 
-            // Only visible & enabled radios
-            const radio = radios.find(r =>
-                r.offsetParent !== null && !r.disabled
-            );
+            if (!r) return false;
+            if (r.disabled) return false;
+            if (r.checked) return true;
 
-            if (!radio) return false;
-
-            radio.click();
+            r.click();
             return true;
         }
         """,
-        answer_index
+        radio_xpath
     )
 
     if not clicked:
-        raise RuntimeError(
-            f"Active radio with answer={answer_index} not found"
-        )
+        raise RuntimeError(f"Failed to click radio with id {radio_id}")
 
     logger.info(
         LogCategory.EXECUTION,
-        f"[PHASE 3] RADIO selected successfully via DOM click: answer={answer_index}"
+        f"[PHASE 3] RADIO clicked HARD via ID: {radio_id}"
     )
