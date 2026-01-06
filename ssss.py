@@ -6,19 +6,22 @@ elif action_type == "RADIO":
 
     step_lower = step_name.lower()
 
-    # answer = 1 or answer = 2
-    match = re.search(r"answer\s*=\s*(\d+)", step_lower)
-    if not match:
+    # Decide XPath ONLY
+    if "answer = 1" in step_lower:
+        radio_xpath = "//input[@type='radio' and contains(@id,'answer1') and not(@disabled)]"
+    elif "answer = 2" in step_lower:
+        radio_xpath = "//input[@type='radio' and contains(@id,'answer2') and not(@disabled)]"
+    else:
         raise RuntimeError("RADIO step must specify answer = 1 or answer = 2")
 
-    answer_index = match.group(1)
+    # 🚫 NO frames
+    # 🚫 NO locators
+    # 🚫 NO scroll
+    # 🚫 NO wait_for
 
-    nav_frame, content_frame = resolve_ccs_frames(page)
-
-    radio_xpath = f"//input[@type='radio' and contains(@id,'answer{answer_index}') and not(@disabled)]"
-
-    clicked = await content_frame.evaluate(
-        """(xpath) => {
+    clicked = await page.evaluate(
+        """
+        (xpath) => {
             const res = document.evaluate(
                 xpath,
                 document,
@@ -28,20 +31,27 @@ elif action_type == "RADIO":
             );
             for (let i = 0; i < res.snapshotLength; i++) {
                 const el = res.snapshotItem(i);
-                if (el && el.offsetParent !== null) {
+                if (el && el.offsetParent !== null && !el.disabled) {
                     el.click();
                     return true;
                 }
             }
             return false;
-        }""",
+        }
+        """,
         radio_xpath
     )
 
     if not clicked:
         raise RuntimeError(f"Radio not clicked using xpath: {radio_xpath}")
 
-    await page.wait_for_timeout(1000)
+    logger.info(
+        LogCategory.EXECUTION,
+        f"[PHASE 3] RADIO clicked successfully using xpath: {radio_xpath}"
+    )
+
+    # 🚀 MOVE TO NEXT STEP IMMEDIATELY
+    continue
 
     logger.info(
         LogCategory.EXECUTION,
