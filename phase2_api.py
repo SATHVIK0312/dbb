@@ -1,293 +1,62 @@
-using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Text.Json;
-using System.Windows;
-using System.Windows.Controls;
-using JPMCGenAI_v1._0.Services;
-
-namespace JPMCGenAI_v1._0
-{
-    // Move data models outside the page class so they can be shared
-    public class UserStory
-    {
-        public int id { get; set; }
-        public int document_id { get; set; }
-        public string story { get; set; }
-    }
-
-    public class SoftwareFlow
-    {
-        public int id { get; set; }
-        public int document_id { get; set; }
-        public string step { get; set; }
-    }
-
-    public class TestCase
-    {
-        public int id { get; set; }
-        public int document_id { get; set; }
-        public string test_case_id { get; set; }
-        public string description { get; set; }
-        public string pre_req_id { get; set; }
-        public string pre_req_desc { get; set; }
-        public string tags { get; set; }
-        public string steps { get; set; }
-        public string arguments { get; set; }
-    }
-
-    public partial class KnowledgeCenterPage : Page
-    {
-        private readonly string _projectId;
-        private string _selectedFilePath;
-
-        public KnowledgeCenterPage(string projectId = "")
-        {
-            InitializeComponent();
-            _projectId = projectId;
-        }
-
-        // ---------------- Page Load ----------------
-        private async void Page_Loaded(object sender, RoutedEventArgs e)
-        {
-            LoadProjectInfo();
-            await LoadAllKnowledgeData();
-        }
-
-        // ---------------- Load Project Info ----------------
-        private void LoadProjectInfo()
-        {
-            if (Session.CurrentProject != null)
-            {
-                // Use the available property from Session.CurrentProject
-                ProjectTitleTextBlock.Text = Session.CurrentProject.name ?? "Current Project";
-                ProjectDetailsTextBlock.Text = $"ID: {Session.CurrentProject.projectid}";
-            }
-            else
-            {
-                ProjectTitleTextBlock.Text = "No Project";
-                ProjectDetailsTextBlock.Text = "Please select a project";
-            }
-        }
-
-        // ---------------- Load All Data ----------------
-        private async System.Threading.Tasks.Task LoadAllKnowledgeData()
-        {
-            try
-            {
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                HttpResponseMessage response = await client.GetAsync("knowledge-center/all-data");
-                string json = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    MessageBox.Show($"Failed to load data: {response.StatusCode}");
-                    return;
-                }
-
-                var result = JsonSerializer.Deserialize<KnowledgeCenterResponse>(
-                    json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                if (result?.data != null)
-                {
-                    // Update counts
-                    UserStoriesCountText.Text = result.counts.user_stories.ToString();
-                    SoftwareFlowsCountText.Text = result.counts.software_flows.ToString();
-                    TestCasesCountText.Text = result.counts.test_cases.ToString();
-
-                    // Update grids
-                    UserStoriesGrid.ItemsSource = result.data.user_stories;
-                    SoftwareFlowsGrid.ItemsSource = result.data.software_flows;
-                    TestCasesGrid.ItemsSource = result.data.test_cases;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error loading knowledge data: {ex.Message}");
-            }
-        }
-
-        // ---------------- Browse ----------------
-        private void BrowseFile_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new OpenFileDialog
-            {
-                Filter = "Documents (*.pdf;*.docx;*.xlsx)|*.pdf;*.docx;*.xlsx"
-            };
-
-            if (dlg.ShowDialog() == true)
-            {
-                _selectedFilePath = dlg.FileName;
-                SelectedFileText.Text = dlg.SafeFileName;
-            }
-        }
-
-        // ---------------- Analyze ----------------
-        private async void AnalyzeDocument_Click(object sender, RoutedEventArgs e)
-        {
-            if (string.IsNullOrEmpty(_selectedFilePath))
-            {
-                MessageBox.Show("Please select a document first.");
-                return;
-            }
-
-            try
-            {
-                // UI state
-                AnalyzeButton.IsEnabled = false;
-                AnalyzeButton.Content = "Analyzing...";
-
-                // Force UI refresh
-                await Dispatcher.InvokeAsync(() => { });
-
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                HttpResponseMessage response =
-                    await client.PostFileAsync("analyze-document", _selectedFilePath);
-
-                string json = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    MessageBox.Show($"Analyze failed: {response.StatusCode}\n{json}");
-                    return;
-                }
-
-                var analyzeResult = JsonSerializer.Deserialize<AnalyzeResponse>(
-                    json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                if (analyzeResult?.document_id == null)
-                {
-                    MessageBox.Show("Failed to parse analyze response.");
-                    return;
-                }
-
-                // Show popup with document details
-                await ShowDocumentDetailsPopup(analyzeResult.document_id);
-
-                // Reload main data
-                await LoadAllKnowledgeData();
-                
-                // Clear selection
-                _selectedFilePath = null;
-                SelectedFileText.Text = "No file selected";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error: {ex.Message}");
-            }
-            finally
-            {
-                AnalyzeButton.IsEnabled = true;
-                AnalyzeButton.Content = "Analyze";
-            }
-        }
-
-        // ---------------- Show Document Details Popup ----------------
-        private async System.Threading.Tasks.Task ShowDocumentDetailsPopup(int documentId)
-        {
-            try
-            {
-                using var client = new ApiClient();
-                client.SetBearer(Session.Token);
-
-                // Fetch all details for the document
-                var userStoriesTask = client.GetAsync($"documents/{documentId}/user-stories");
-                var softwareFlowTask = client.GetAsync($"documents/{documentId}/software-flow");
-                var testCasesTask = client.GetAsync($"documents/{documentId}/test-cases");
-
-                await System.Threading.Tasks.Task.WhenAll(userStoriesTask, softwareFlowTask, testCasesTask);
-
-                var userStoriesJson = await userStoriesTask.Result.Content.ReadAsStringAsync();
-                var softwareFlowJson = await softwareFlowTask.Result.Content.ReadAsStringAsync();
-                var testCasesJson = await testCasesTask.Result.Content.ReadAsStringAsync();
-
-                var userStories = JsonSerializer.Deserialize<List<UserStory>>(
-                    userStoriesJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                var softwareFlows = JsonSerializer.Deserialize<List<SoftwareFlow>>(
-                    softwareFlowJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                var testCases = JsonSerializer.Deserialize<List<TestCase>>(
-                    testCasesJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                // Show popup window
-                var popup = new DocumentDetailsWindow(documentId, userStories, softwareFlows, testCases);
-                popup.ShowDialog();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error loading document details: {ex.Message}");
-            }
-        }
-
-        // =====================================================================
-        // NAVIGATION
-        // =====================================================================
-        private void BackToDashboard_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(Session.CurrentProject != null
-                ? new DashboardPage(Session.CurrentProject.projectid)
-                : new ProjectPage());
-
-        private void AITestExecutor_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(Session.CurrentProject != null
-                ? new AITestExecutorPage(Session.CurrentProject.projectid)
-                : new ProjectPage());
-
-        private void ScriptGenerator_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(new ScriptGeneratorPage());
-
-        private void UploadTestCase_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(new UploadTestCasePage());
-
-        private void ExecutionLog_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(new ExecutionLogPage());
-
-        private void ChangeProject_Click(object sender, RoutedEventArgs e)
-            => NavigationService?.Navigate(new ProjectPage());
-
-        // ---------------- RESPONSE MODELS ----------------
-        
-        private class KnowledgeCenterResponse
-        {
-            public string status { get; set; }
-            public CountsData counts { get; set; }
-            public AllData data { get; set; }
-        }
-
-        private class CountsData
-        {
-            public int user_stories { get; set; }
-            public int software_flows { get; set; }
-            public int test_cases { get; set; }
-        }
-
-        private class AllData
-        {
-            public List<UserStory> user_stories { get; set; }
-            public List<SoftwareFlow> software_flows { get; set; }
-            public List<TestCase> test_cases { get; set; }
-        }
-
-        private class AnalyzeResponse
-        {
-            public string status { get; set; }
-            public int document_id { get; set; }
-            public string message { get; set; }
-        }
-    }
-}
+JIRA User Story – Sample (Detailed)
+1. User Story Title
+As a QA Engineer, I want to upload test cases in bulk so that I can reduce manual effort and speed
+up test execution.
+2. JIRA Metadata
+Issue Type: Story
+Priority: High
+Story Points: 8
+Sprint: Sprint 5
+3. Description
+Manual creation of test cases is time-consuming and error-prone. This feature enables QA
+engineers to upload multiple test cases at once using a standardized file format, improving
+efficiency, accuracy, and consistency across projects.
+4. User Persona
+Primary User: QA Engineer
+Secondary Users: Test Lead, Automation Engineer
+Stakeholders: Product Owner, QA Manager
+5. Business Objective
+- Reduce test case creation effort by 60–70%
+- Improve standardization of test artifacts
+- Accelerate regression cycles
+6. Assumptions
+- User is authenticated and authorized
+- Input file follows provided template
+- System services are available
+7. Acceptance Criteria
+AC1: Given the user is logged in, when a valid file is uploaded, then test cases are saved
+successfully.
+AC2: Given an invalid file format, when upload is triggered, then an error message is shown.
+AC3: Given parsing is successful, when preview is shown, then user can confirm or cancel upload.
+8. Functional Requirements
+- Support CSV and Excel uploads
+- Validate mandatory fields
+- Preview parsed data
+- Persist data after confirmation
+9. Non-Functional Requirements
+- Upload processing ≤ 5 seconds for 500 records
+- Secure file handling
+- API response ≤ 2 seconds
+10. UI / UX Requirements
+- Upload & drag-drop support
+- Progress indicator
+- Error summary panel
+- Preview grid with edit capability
+11. Dependencies
+- Test Case Management Service
+- File Parsing Utility
+- Database Service
+12. Out of Scope
+- Editing existing test cases
+- Test case versioning
+- Automation script generation
+13. Definition of Done
+- Code reviewed and merged
+- All acceptance criteria met
+- Unit and integration tests passed
+- Product Owner approval received
+14. Risks & Mitigation
+Large file upload – enforce size limits
+Invalid data – strict schema validation
+15. Notes
+Standard upload template will be provided. Audit logging is required.
