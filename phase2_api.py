@@ -60,7 +60,8 @@ namespace JPMCGenAI_v1._0
         {
             if (Session.CurrentProject != null)
             {
-                ProjectTitleTextBlock.Text = Session.CurrentProject.project_name;
+                // Use the available property from Session.CurrentProject
+                ProjectTitleTextBlock.Text = Session.CurrentProject.name ?? "Current Project";
                 ProjectDetailsTextBlock.Text = $"ID: {Session.CurrentProject.projectid}";
             }
             else
