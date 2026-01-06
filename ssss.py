@@ -2,48 +2,48 @@
 //input[@id='claimsPageForm.erbeAnswerPanelData.answer2']
 
 
-elif action_type == "BUTTON":
-    if "name =" not in step_name:
-        raise RuntimeError("BUTTON step missing button name")
+elif action_type == "RADIO":
 
     step_lower = step_name.lower()
-    button_name = step_name.split("name =")[-1].strip().lower()
+
+    # answer = 1 or answer = 2
+    match = re.search(r"answer\s*=\s*(\d+)", step_lower)
+    if not match:
+        raise RuntimeError("RADIO step must specify answer = 1 or answer = 2")
+
+    answer_index = match.group(1)
 
     nav_frame, content_frame = resolve_ccs_frames(page)
 
+    radio_xpath = f"//input[@type='radio' and contains(@id,'answer{answer_index}') and not(@disabled)]"
+
     clicked = await content_frame.evaluate(
-        """
-        (buttonName) => {
-            const buttons = Array.from(
-                document.querySelectorAll("input[type='button'], input[type='submit'], button")
+        """(xpath) => {
+            const res = document.evaluate(
+                xpath,
+                document,
+                null,
+                XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                null
             );
-
-            const btn = buttons.find(b => {
-                const txt = (b.innerText || "").toLowerCase();
-                const val = (b.value || "").toLowerCase();
-                return (
-                    (txt.includes(buttonName) || val.includes(buttonName)) &&
-                    !b.disabled &&
-                    b.offsetParent !== null
-                );
-            });
-
-            if (!btn) return false;
-
-            btn.click();
-            return true;
-        }
-        """,
-        button_name
+            for (let i = 0; i < res.snapshotLength; i++) {
+                const el = res.snapshotItem(i);
+                if (el && el.offsetParent !== null) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }""",
+        radio_xpath
     )
 
     if not clicked:
-        raise RuntimeError(f"Button '{button_name}' not clicked")
+        raise RuntimeError(f"Radio not clicked using xpath: {radio_xpath}")
+
+    await page.wait_for_timeout(1000)
 
     logger.info(
         LogCategory.EXECUTION,
-        f"[PHASE 3] BUTTON clicked safely via DOM: {button_name}"
+        f"[PHASE 3] RADIO selected successfully: answer={answer_index}"
     )
-
-    # Allow CCS transition
-    await content_frame.wait_for_timeout(800)
