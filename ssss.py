@@ -3,10 +3,17 @@
 
 
 elif action_type == "RADIO":
-
     step_lower = step_name.lower()
 
-    # Decide XPath ONLY
+    print("I found the radio button")
+    logger.info(
+        LogCategory.EXECUTION,
+        "[PHASE 3] RADIO step detected"
+    )
+
+    # ----------------------------
+    # Hard decision based on step
+    # ----------------------------
     if "answer = 1" in step_lower:
         radio_xpath = "//input[@type='radio' and contains(@id,'answer1') and not(@disabled)]"
     elif "answer = 2" in step_lower:
@@ -14,46 +21,17 @@ elif action_type == "RADIO":
     else:
         raise RuntimeError("RADIO step must specify answer = 1 or answer = 2")
 
-    # 🚫 NO frames
-    # 🚫 NO locators
-    # 🚫 NO scroll
-    # 🚫 NO wait_for
+    # ----------------------------
+    # HARD CLICK – NO SCROLL, NO FRAME, NO WAIT
+    # ----------------------------
+    radio = page.locator(f"xpath={radio_xpath}").first
 
-    clicked = await page.evaluate(
-        """
-        (xpath) => {
-            const res = document.evaluate(
-                xpath,
-                document,
-                null,
-                XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-                null
-            );
-            for (let i = 0; i < res.snapshotLength; i++) {
-                const el = res.snapshotItem(i);
-                if (el && el.offsetParent !== null && !el.disabled) {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
-        }
-        """,
-        radio_xpath
-    )
-
-    if not clicked:
-        raise RuntimeError(f"Radio not clicked using xpath: {radio_xpath}")
+    await radio.wait_for(state="attached", timeout=10000)
+    await radio.click(force=True)
 
     logger.info(
         LogCategory.EXECUTION,
         f"[PHASE 3] RADIO clicked successfully using xpath: {radio_xpath}"
     )
 
-    # 🚀 MOVE TO NEXT STEP IMMEDIATELY
     continue
-
-    logger.info(
-        LogCategory.EXECUTION,
-        f"[PHASE 3] RADIO selected successfully: answer={answer_index}"
-    )
